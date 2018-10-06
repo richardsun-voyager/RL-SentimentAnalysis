@@ -29,6 +29,7 @@ class LSTM_CriticNetwork(object):
             self.optimizer = tf.train.AdadeltaOptimizer(self.learning_rate)
         self.keep_prob = tf.placeholder(tf.float32, name="keepprob")
         self.num_other_variables = len(tf.trainable_variables())
+        #word embeddings
         self.wordvector = tf.get_variable('wordvector', dtype=tf.float32, initializer=wordvector, trainable=True)
 
         #lstm cells

@@ -83,6 +83,9 @@ def train(sess, actor, critic, train_data, batchsize, samplecnt=5, LSTM_trainabl
                     actions, states, Rinput, Rlenth = sampling_RL(sess, actor, inputs, critic.wordvector_find([inputs]), lenth, args.epsilon, Random=True)
                     actionlist.append(actions)
                     statelist.append(states)
+                    #Rinput means the words selected, padding 0s in the end
+                    #Rlenth, the length of selected words
+                    #solution, label
                     out, loss = critic.getloss([Rinput], [Rlenth], [solution])
                     loss += (float(Rlenth) / lenth) **2 *0.15
                     aveloss += loss
