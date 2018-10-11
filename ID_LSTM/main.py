@@ -86,7 +86,9 @@ def train(sess, actor, critic, train_data, batchsize, samplecnt=5, LSTM_trainabl
                     #Rinput means the words selected, padding 0s in the end
                     #Rlenth, the length of selected words
                     #solution, label
+                    #Note, loss is cross entropy plus l2 regularization
                     out, loss = critic.getloss([Rinput], [Rlenth], [solution])
+                    #delete number reward
                     loss += (float(Rlenth) / lenth) **2 *0.15
                     aveloss += loss
                     losslist.append(loss)
@@ -99,6 +101,7 @@ def train(sess, actor, critic, train_data, batchsize, samplecnt=5, LSTM_trainabl
                 for i in range(samplecnt):
                     for pos in range(len(actionlist[i])):
                         rr = [0., 0.]
+                        
                         rr[actionlist[i][pos]] = (losslist[i] - aveloss) * args.alpha
                         g = actor.get_gradient(statelist[i][pos][0], statelist[i][pos][1], rr)
                         if grad == None:

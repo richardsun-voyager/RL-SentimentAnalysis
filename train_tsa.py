@@ -10,7 +10,7 @@ import codecs
 import copy
 import os
 from torch import optim
-
+import sys
 def adjust_learning_rate(optimizer, epoch):
     lr = config.lr / (1.5 ** (epoch // config.adjust_every))
     print("Adjust lr to ", lr)
@@ -62,49 +62,49 @@ def train():
     else:
         model = Agent(config)
 
-    visualize_samples(dg_test, model)
+    # visualize_samples(dg_train, model)
+    # sys.exit()
 
-    # if config.if_gpu: model = model.cuda()
-    # parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
-    # # pdb.set_trace()
-    # optimizer = create_opt(parameters, config)
+    if config.if_gpu: model = model.cuda()
+    parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+    # pdb.set_trace()
+    optimizer = create_opt(parameters, config)
 
-    # loops = dg_train.data_len
+    loops = dg_train.data_len
     
-    # with open(config.log_path+'log.txt', 'w') as f:
-    #     f.write('Experiment starting.....\n')
-    # for e in np.arange(config.epochs):
-    #     print('Epoch:', e)
-    #     model.train()
-    #     dg_train.reset_samples()
-    #     batch = 8
-    #     iter_num =int(loops/batch)
-    #     for i in range(iter_num):
-    #         optimizer.zero_grad()
-    #         total_loss = 0
-    #         #Accumulate gradients
-    #         for _ in np.arange(batch):
-    #             sent_vecs, mask_vecs, label_list, _ = next(dg_train.get_ids_samples())
-    #             sent_vecs, target_avg = cat_layer(sent_vecs, mask_vecs)
-    #             _, _, reward = model(sent_vecs, target_avg, label_list)
-    #             loss = -1 * reward
-    #             total_loss += loss
-    #         total_loss /= batch
-    #         total_loss.backward()
-    #         torch.nn.utils.clip_grad_norm_(model.parameters(), config.clip_norm, norm_type=2)
-    #         optimizer.step()
-    #         if i %20 == 0:
-    #             print(total_loss)
+    with open(config.log_path+'log.txt', 'w') as f:
+        f.write('Experiment starting.....\n')
+    for e in np.arange(config.epochs):
+        print('Epoch:', e)
+        model.train()
+        dg_train.reset_samples()
+        batch = 16
+        iter_num =int(loops/batch)
+        for i in range(iter_num):
+            optimizer.zero_grad()
+            total_loss = 0
+            #Accumulate gradients
+            for _ in np.arange(batch):
+                sent_vecs, mask_vecs, label_list, _ = next(dg_train.get_ids_samples())
+                sent_vecs, target_avg = cat_layer(sent_vecs, mask_vecs)
+                _, actions, loss = model(sent_vecs, target_avg, label_list)
+                total_loss += loss
+            total_loss /= batch
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config.clip_norm, norm_type=2)
+            optimizer.step()
+            if i %20 == 0:
+                print(total_loss)
         
-    #     acc = evaluate_test(dg_test, model)
-    #     with open(config.log_path+'log.txt', 'a') as f:
-    #         f.write('Epoch Num:'+str(e)+'\n')
-    #         f.write('accuracy:'+str(acc))
-    #         f.write('\n')
+        acc = evaluate_test(dg_test, model)
+        with open(config.log_path+'log.txt', 'a') as f:
+            f.write('Epoch Num:'+str(e)+'\n')
+            f.write('accuracy:'+str(acc))
+            f.write('\n')
 
-    #     if acc > best_acc:
-    #         torch.save(model, config.model_path+'model.pt')
-    #         best_acc= acc
+        if acc > best_acc:
+            torch.save(model, config.model_path+'model.pt')
+            best_acc= acc
 
 def visualize_samples(dr_test, model):
     '''
@@ -122,7 +122,7 @@ def visualize_samples(dr_test, model):
         if config.if_gpu: 
             sent, target = sent.cuda(), target.cuda()
             label, sent_len = label.cuda(), sent_len.cuda()
-        pred_label, actions  = model.predict(sent, target) 
+        _, actions  = model.predict(sent, target) 
         print('*'*20)
         print(tokens)
         print('Targets:')

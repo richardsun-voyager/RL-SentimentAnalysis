@@ -44,7 +44,7 @@ class ActorNetwork(object):
         #gradient provided by critic network
         self.action_gradient = tf.placeholder(tf.float32, [2])
         self.log_target_scaled_out = tf.log(self.target_scaled_out)
-
+        #self.action_gradient, initial gradients
         self.actor_gradients = tf.gradients(self.log_target_scaled_out, self.target_network_params, self.action_gradient)
         print self.actor_gradients
 
