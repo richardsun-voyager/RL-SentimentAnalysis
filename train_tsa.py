@@ -128,7 +128,7 @@ def visualize_samples(dr_test, model):
             label, sent_len = label.cuda(), sent_len.cuda()
         _, actions  = model.predict(sent, mask_vecs) 
         print('*'*20)
-        print(tokens)
+        #print(tokens)
         print('Targets:')
         print(mask_vecs)
         print('Label:', label)
