@@ -57,9 +57,9 @@ def train():
     dg_test =data_generator(config, test_data, False)
 
 
-    if os.path.exists(config.model_path+'model.pt'):
+    if os.path.exists(config.model_path+'rl_model.pt'):
         print('Loading pretrained model....')
-        model = torch.load(config.model_path+'model.pt')
+        model = torch.load(config.model_path+'rl_model.pt')
     else:
         model = Agent(config)
 
@@ -73,7 +73,7 @@ def train():
 
     loops = dg_train.data_len
     
-    with open(config.log_path+'log.txt', 'w') as f:
+    with open(config.log_path+'rl_log.txt', 'w') as f:
         f.write('Experiment starting.....\n')
     for e in np.arange(config.epochs):
         print('Epoch:', e)
@@ -101,14 +101,15 @@ def train():
                 print(total_loss)
         
         acc = evaluate_test(dg_test, model)
-        with open(config.log_path+'log.txt', 'a') as f:
+        with open(config.log_path+'rl_log.txt', 'a') as f:
             f.write('Epoch Num:'+str(e)+'\n')
             f.write('accuracy:'+str(acc))
             f.write('\n')
 
-        if acc > best_acc:
-            torch.save(model, config.model_path+'model.pt')
-            best_acc= acc
+        if acc > best_acc: 
+            best_acc = acc
+            best_model = copy.deepcopy(model)
+            torch.save(best_model, config.model_path+'rl_model.pt')
 
 def visualize_samples(dr_test, model):
     '''
@@ -120,7 +121,7 @@ def visualize_samples(dr_test, model):
     all_counter = 0
     while all_counter < 10:
         all_counter += 1
-        sent_vecs, mask_vecs, label, sent_len = next(dr_test.get_ids_samples(True))
+        sent_vecs, mask_vecs, label, sent_len = next(dr_test.get_ids_samples())
         sent, target = cat_layer(sent_vecs, mask_vecs)
         if config.if_gpu: 
             sent, target = sent.cuda(), target.cuda()
