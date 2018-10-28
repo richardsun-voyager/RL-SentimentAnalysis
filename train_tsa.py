@@ -57,18 +57,14 @@ def train():
     dg_test =data_generator(config, test_data, False)
 
 
+    if os.path.exists(config.model_path+'model.pt'):
+        print('Loading pretrained model....')
+        model = torch.load(config.model_path+'model.pt')
+    else:
+        model = Agent(config)
 
-
-
-
-    # if os.path.exists(config.model_path+'model.pt'):
-    #     print('Loading pretrained model....')
-    #     model = torch.load(config.model_path+'model.pt')
-    # else:
-    model = Agent(config)
-
-    # visualize_samples(dg_train, model)
-    # sys.exit()
+    visualize_samples(dg_train, model)
+    sys.exit()
 
     if config.if_gpu: model = model.cuda()
     parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -122,15 +118,14 @@ def visualize_samples(dr_test, model):
     dr_test.reset_samples()
     model.eval()
     all_counter = 0
-    correct_count = 0
     while all_counter < 10:
         all_counter += 1
-        sent_vecs, mask_vecs, label, sent_len, tokens = next(dr_test.get_ids_samples(True))
+        sent_vecs, mask_vecs, label, sent_len = next(dr_test.get_ids_samples(True))
         sent, target = cat_layer(sent_vecs, mask_vecs)
         if config.if_gpu: 
             sent, target = sent.cuda(), target.cuda()
             label, sent_len = label.cuda(), sent_len.cuda()
-        _, actions  = model.predict(sent, target) 
+        _, actions  = model.predict(sent, mask_vecs) 
         print('*'*20)
         print(tokens)
         print('Targets:')
