@@ -8,7 +8,7 @@ class Config:
         self.id2action = {i:a for i, a in enumerate(self.actions)}
         #Word embeddings dimension
         self.embed_dim = 300#word embeddings
-        self.embed_num = 4334 #Number of words
+        self.embed_num = 4436 #Number of words
         self.mask_dim = 50
         #LSTM hidden state dimension
 

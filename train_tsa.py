@@ -56,11 +56,16 @@ def train():
     dg_train = data_generator(config, train_data, False)
     dg_test =data_generator(config, test_data, False)
 
-    if os.path.exists(config.model_path+'model.pt'):
-        print('Loading pretrained model....')
-        model = torch.load(config.model_path+'model.pt')
-    else:
-        model = Agent(config)
+
+
+
+
+
+    # if os.path.exists(config.model_path+'model.pt'):
+    #     print('Loading pretrained model....')
+    #     model = torch.load(config.model_path+'model.pt')
+    # else:
+    model = Agent(config)
 
     # visualize_samples(dg_train, model)
     # sys.exit()
@@ -84,10 +89,13 @@ def train():
             optimizer.zero_grad()
             total_loss = 0
             #Accumulate gradients
+            #One sentence each time
             for _ in np.arange(batch):
-                sent_vecs, mask_vecs, label_list, _ = next(dg_train.get_ids_samples())
-                sent_vecs, target_avg = cat_layer(sent_vecs, mask_vecs)
-                _, actions, loss = model(sent_vecs, target_avg, label_list)
+                sent_vecs, mask_vecs, label_list, sent_lens = next(dg_train.get_ids_samples())
+                #Get embeddings for the sentence and the target, no concatenation
+                sent_vecs, target_vecs = cat_layer(sent_vecs, mask_vecs, False)
+                #Pass target vectors to the model
+                _, actions, loss = model(sent_vecs, mask_vecs, label_list)
                 total_loss += loss
             total_loss /= batch
             total_loss.backward()
@@ -139,11 +147,11 @@ def evaluate_test(dr_test, model):
     correct_count = 0
     while dr_test.index < dr_test.data_len:
         sent_vecs, mask_vecs, label, sent_len = next(dr_test.get_ids_samples())
-        sent, target = cat_layer(sent_vecs, mask_vecs)
+        sent, target = cat_layer(sent_vecs, mask_vecs, False)
         if config.if_gpu: 
             sent, target = sent.cuda(), target.cuda()
             label, sent_len = label.cuda(), sent_len.cuda()
-        pred_label, _  = model.predict(sent, target) 
+        pred_label, _  = model.predict(sent, mask_vecs) 
 
         correct_count += sum(pred_label==label).item()
     if dr_test.data_len < 1:

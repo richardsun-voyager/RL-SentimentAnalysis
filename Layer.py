@@ -79,7 +79,7 @@ class GloveMaskCat(nn.Module):
         self.dropout = nn.Dropout(config.rnn_dropout)
 
     # input are tensors
-    def forward(self, sent, mask, is_avg=True):
+    def forward(self, sents, masks, is_avg=True):
         '''
         Args:
         sent: tensor, shape(batch_size, max_len)
@@ -90,17 +90,19 @@ class GloveMaskCat(nn.Module):
 
         #Use GloVe embedding
         if self.config.if_gpu:  
-            sent, mask = sent.cuda(), mask.cuda()
+            sents, masks = sents.cuda(), masks.cuda()
         # to embeddings
-        sent_vec = self.word_embed(sent) # batch_siz*sent_len * dim
+        sent_vec = self.word_embed(sents) # batch_siz*sent_len * dim
         #Concatenate each word embedding with target word embeddings' average
-        batch_size, max_len = sent.size()
+        batch_size, max_len = sents.size()
+        #Get the index of target
+        #target_index = [torch.nonzero(mask).squeeze(1) for mask in masks]
         #Repeat the mask
-        mask = mask.type_as(sent_vec)
-        mask = mask.expand(self.config.embed_dim, batch_size, max_len)
-        mask = mask.transpose(0, 1).transpose(1, 2)#The same size as sentence vector
-        target_emb = sent_vec * mask
-        target_emb_avg = torch.sum(target_emb, 1)/torch.sum(mask, 1)#Batch_size*embedding
+        masks = masks.type_as(sent_vec)
+        masks = masks.expand(self.config.embed_dim, batch_size, max_len)
+        masks = masks.transpose(0, 1).transpose(1, 2)#The same size as sentence vector
+        target_emb = sent_vec * masks
+        target_emb_avg = torch.sum(target_emb, 1)/torch.sum(masks, 1)#Batch_size*embedding
         #Expand dimension for concatenation
         target_emb_avg_exp = target_emb_avg.expand(max_len, batch_size, self.config.embed_dim)
         target_emb_avg_exp = target_emb_avg_exp.transpose(0, 1)#Batch_size*max_len*embedding
