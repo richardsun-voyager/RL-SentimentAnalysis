@@ -2,10 +2,11 @@
 #This file aims to preprocess data and generate samples for training and testing
 from collections import namedtuple, defaultdict
 import codecs
-#from config import config
+from config import config
 from bs4 import BeautifulSoup
 import pdb
 import torch
+#import tokenizer
 import numpy as np
 import re
 import pickle
@@ -16,12 +17,6 @@ from collections import Counter
 from allennlp.modules.elmo import Elmo, batch_to_ids
 import en_core_web_sm
 nlp = en_core_web_sm.load()
-
-# from mosestokenizer import MosesTokenizer
-# tokenizer = MosesTokenizer()
-
-from stanfordcorenlp import StanfordCoreNLP
-stanford_nlp = StanfordCoreNLP(r'../data/stanford-corenlp-full-2018-02-27')
 
 options_file = "../data/Elmo/elmo_2x4096_512_2048cnn_2xhighway_options.json"
 weight_file = "../data/Elmo/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"
@@ -86,7 +81,7 @@ class dataHelper():
         sentence_list = []
         for sent_tag in sentence_tags:
             sent_id = sent_tag.attrs["id"]
-            sent_text = self.clean_text(sent_tag.find("text").contents[0])
+            sent_text = sent_tag.find("text").contents[0]
             opinion_list = []
             try:
                 asp_tag = sent_tag.find_all("aspectterms")[0]
@@ -96,8 +91,8 @@ class dataHelper():
                 continue
             opinion_tags = asp_tag.find_all("aspectterm")
             for opinion_tag in opinion_tags:
-                term = self.clean_text(opinion_tag.attrs["term"])
-                if term not in sent_text: print(sent_text, term)
+                term = opinion_tag.attrs["term"]
+                if term not in sent_text: pdb.set_trace()
                 polarity = opinion_tag.attrs["polarity"]
                 opinion_inst = OpinionInst(term, polarity, None, None, None)
                 opinion_list.append(opinion_inst)
@@ -106,53 +101,22 @@ class dataHelper():
 
         return sentence_list
 
-    def clean_str(self, text):
-        """
-        Tokenization/string cleaning for all datasets except for SST.
-        Original taken from https://github.com/yoonkim/CNN_sentence/blob/master/process_data.py
-        """
-        string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", text)
-        string = re.sub(r"\'s", " \'s", string)
-        string = re.sub(r"\'ve", " \'ve", string)
-        string = re.sub(r"n\'t", " n\'t", string)
-        string = re.sub(r"\'re", " \'re", string)
-        string = re.sub(r"\'d", " \'d", string)
-        string = re.sub(r"\'ll", " \'ll", string)
-        string = re.sub(r",", " , ", string)
-        string = re.sub(r"!", " ! ", string)
-        string = re.sub(r"\(", " \( ", string)
-        string = re.sub(r"\)", " \) ", string)
-        string = re.sub(r"\?", " \? ", string)
-        string = re.sub(r"\s{2,}", " ", string)
-        return string.strip()
-
-    def clean_text(self, text):
-        # return word_tokenize(sent_str)
-        if self.config.is_stanford_nlp:
-            text = self.clean_str(text)
-        sent_str = " ".join(text.split("-"))
-        sent_str = " ".join(sent_str.split("/"))
-        sent_str = " ".join(sent_str.split("("))
-        sent_str = " ".join(sent_str.split(")"))
-        sent_str = " ".join(sent_str.split())
-        return sent_str
-
-    
-    def stanford_tokenize(self, sent_str):
-        return stanford_nlp.word_tokenize(sent_str)
-
 
     def tokenize(self, sent_str):
         '''
         Split a sentence into tokens
         '''
+        # return word_tokenize(sent_str)
+        sent_str = " ".join(sent_str.split("-"))
+        sent_str = " ".join(sent_str.split("/"))
+        sent_str = " ".join(sent_str.split("!"))
+        #For indonesian
+        sent_str = " ".join(sent_str.split("@"))
         sent = nlp(sent_str)
-        #return [item.text.lower() for item in sent]
-        return [item.text for item in sent]
-        #return tokenizer(sent_str)
+        return [item.text.lower() for item in sent]
         
     # namedtuple is protected!
-    def process_raw_data(self, data, stanford_tokenizer=False):
+    def process_raw_data(self, data, is_training=True):
         '''
         Tokenize each sentence, compute aspect mask for each sentence
         '''
@@ -162,10 +126,7 @@ class dataHelper():
         for sent_i in np.arange(sent_len):
             sent_inst = data[sent_i]
             #Tokenize texts
-            if stanford_tokenizer:
-                sent_tokens = self.stanford_tokenize(sent_inst.text)
-            else:
-                sent_tokens = self.tokenize(sent_inst.text)
+            sent_tokens = self.tokenize(sent_inst.text)
             text_words.append(sent_tokens)
             sent_inst = sent_inst._replace(text_inds = sent_tokens)
             opinion_list = []
@@ -175,10 +136,7 @@ class dataHelper():
                 opi_inst = sent_inst.opinions[opi_i]
 
                 target = opi_inst.target_text
-                if stanford_tokenizer:
-                    target_tokens = self.stanford_tokenize(target)
-                else:
-                    target_tokens = self.tokenize(target)
+                target_tokens = self.tokenize(target)
                 try:
                     target_start = sent_tokens.index(target_tokens[0])
                     target_end = sent_tokens[max(0, target_start - 1):].index(target_tokens[-1])  + max(0, target_start - 1)
@@ -284,7 +242,7 @@ class dataHelper():
         id2word = {i:w for i, w in enumerate(words)}
 
         #Save the dictionary
-        dict_file = self.config.dic_path
+        dict_file = config.dic_path
         dict_path = os.path.dirname(dict_file)  
         if not os.path.exists(dict_path):
             print('Dictionary path doesnot exist')
@@ -304,11 +262,11 @@ class dataHelper():
         local_emb = []
         #if the unknow vectors were not given, initialize one
         if self.UNK not in pretrained_word_emb.keys():
-            pretrained_word_emb[self.UNK] = np.random.randn(self.config.embed_dim)
+            pretrained_word_emb[self.UNK] = np.random.randn(config.embed_dim)
         for w in local_vocab:
             local_emb.append(self.word2vec(pretrained_word_emb, w))
         local_emb = np.vstack(local_emb)
-        emb_path = self.config.embed_path
+        emb_path = config.embed_path
         if not os.path.exists(os.path.dirname(emb_path)):
             print('Path not exists')
             os.mkdir(os.path.dirname(emb_path))
@@ -326,19 +284,11 @@ class dataHelper():
         '''
         word_emb = {}
         vocab_words = set()
-#         with open(file_path) as fi:
-#             for line in fi:
-#                 items = line.split()
-#                 word_emb[items[0]] = np.array(items[1:], dtype=np.float32)
-#                 vocab_words.add(items[0])
-#         return word_emb, vocab_words
         with open(file_path) as fi:
             for line in fi:
                 items = line.split()
-                word = ' '.join(items[:-1*self.config.embed_dim])
-                vec = items[-1*self.config.embed_dim:]
-                word_emb[word] = np.array(vec, dtype=np.float32)
-                vocab_words.add(word)
+                word_emb[items[0]] = np.array(items[1:], dtype=np.float32)
+                vocab_words.add(items[0])
         return word_emb, vocab_words
 
     def word2vec(self, vocab, word):
@@ -352,7 +302,7 @@ class dataHelper():
         return vec
     
 
-    def read(self, data_path, data_source='xml'):
+    def read(self, data_path, data_source='xml', is_training=True):
         '''
         read and process raw data, create dictionary and index based on the training data
         '''
@@ -363,7 +313,7 @@ class dataHelper():
         #self.test_data = self.read_xml_data(test_data)
         print('Dataset number:', len(train_data))
         #print('Testing dataset number:', len(self.test_data))
-        data = self.process_raw_data(train_data, self.config.is_stanford_nlp)
+        data = self.process_raw_data(train_data, is_training)
 
         # emb = self.load_pretrained_word_emb(config.pretrained_embed_path)
         # _ = self.get_local_word_embeddings(emb, words)
@@ -378,7 +328,6 @@ class dataHelper():
         # list of list
         pair_couter = defaultdict(int)
         for sent_inst in data:
-            text = sent_inst.text
             tokens = sent_inst.text_inds
             token_ids = sent_inst.text_ids
             #print(tokens)
@@ -388,7 +337,7 @@ class dataHelper():
                 polarity = opi_inst.class_ind
                 if tokens is None or mask is None or polarity is None: 
                     continue
-                all_triples.append([tokens, mask, polarity, token_ids, str(text)])
+                all_triples.append([tokens, mask, polarity, token_ids])
                 pair_couter[polarity] += 1
                 
         print(pair_couter)
@@ -434,7 +383,7 @@ class data_reader:
         data_list = []
         text_word_list = []
         for data_path in data_path_list:
-            data, text_words = self.dh.read(data_path, data_source)
+            data, text_words = self.dh.read(data_path, data_source, self.is_training)
             data_list.append(data)
             text_word_list.extend(text_words)
         #Build dictionary based on all the words
@@ -443,17 +392,17 @@ class data_reader:
             ## Create embeddings for the words in the given dataset
             words = self.dh.build_local_vocab(text_word_list, self.config.embed_num)
             #Create local embeddings for each word
-            dict_file = self.config.dic_path
+            dict_file = config.dic_path
             #The dictionary must be created in advance
             if not os.path.exists(dict_file):
                 print('Dictionary file not exist!')
             with open(dict_file, 'rb') as f:
                 word2id, _, _ = pickle.load(f)
-            emb, _ = self.dh.load_pretrained_word_emb(self.config.pretrained_embed_path)
+            emb, _ = self.dh.load_pretrained_word_emb(config.pretrained_embed_path)
             _ = self.dh.get_local_word_embeddings(emb, words)
         else:
             ####################Use Glove vocabulary
-            emb, words = self.dh.load_pretrained_word_emb(self.config.pretrained_embed_path)
+            emb, words = self.dh.load_pretrained_word_emb(config.pretrained_embed_path)
             #Save word embeddings in binary format
             _ = self.dh.get_local_word_embeddings(emb, words)
             #Build dictionary
@@ -484,13 +433,13 @@ class data_reader:
         print('Reading Dataset....')
         data, text_words = self.dh.read(data_path, data_source, self.is_training)
         #Build dictionary
-        if not use_glove:#Use glove directly, quite large, to be cautious
+        if not use_glove:
             words = self.dh.build_local_vocab(text_words, self.config.embed_num)
             #Create local embeddings
-            emb, _ = self.dh.load_pretrained_word_emb(self.config.pretrained_embed_path)
+            emb, _ = self.dh.load_pretrained_word_emb(config.pretrained_embed_path)
             _ = self.dh.get_local_word_embeddings(emb, words)
             #Map words into Ids
-            dict_file = self.config.dic_path
+            dict_file = config.dic_path
             #The dictionary must be created in advance
             if not os.path.exists(dict_file):
                 print('Dictionary file not exist!')
@@ -498,7 +447,7 @@ class data_reader:
                 word2id, _, _ = pickle.load(f)
         else:
             ####################Use Glove vocabulary
-            emb, words = self.dh.load_pretrained_word_emb(self.config.pretrained_embed_path)
+            emb, words = self.dh.load_pretrained_word_emb(config.pretrained_embed_path)
             #Save word embeddings in binary format
             _ = self.dh.get_local_word_embeddings(emb, words)
             #Build dictionary
@@ -517,9 +466,12 @@ class data_reader:
         '''
         Save the data in specified folder
         '''
-        with open(save_path, "wb") as f:
-            pickle.dump(data,f)
-        print('Saving successfully!')   
+        try:
+            with open(save_path, "wb") as f:
+                pickle.dump(data,f)
+            print('Saving successfully!')
+        except:
+            print('Saving failure!')   
 
     def load_data(self, load_path):
         '''
@@ -532,16 +484,15 @@ class data_reader:
             self.load_local_dict()
         else:
             print('Data not exist!')  
-            return None
         return  self.data_batch
 
     def load_local_dict(self):
         '''
         Load dictionary files
         '''
-        if not os.path.exists(self.config.dic_path):
+        if not os.path.exists(config.dic_path):
             print('Dictionary file not exist!')
-        with open(self.config.dic_path, 'rb') as f:
+        with open(config.dic_path, 'rb') as f:
             word2id, _, _ = pickle.load(f)
         self.UNK_ID = word2id[self.dh.UNK]
         self.PAD_ID = word2id[self.dh.PAD]
@@ -595,9 +546,9 @@ class data_generator:
         '''
         Load dictionary files
         '''
-        if not os.path.exists(self.config.dic_path):
+        if not os.path.exists(config.dic_path):
             print('Dictionary file not exist!')
-        with open(self.config.dic_path, 'rb') as f:
+        with open(config.dic_path, 'rb') as f:
             word2id, _, _ = pickle.load(f)
         self.UNK_ID = word2id[self.UNK]
         self.PAD_ID = word2id[self.PAD]
@@ -612,30 +563,12 @@ class data_generator:
         select_trip = [all_triples[i] for i in select_index]
         return select_trip
 
-    def generate_balanced_sample(self, all_triples):
-        '''
-        Generate balanced training data set 
-        rate: list, i.e., [0.6, 0.2, 0.2]
-        '''
-        batch_size = self.config.batch_size
-        #labels must be number in order to sort
-        labels = [item[2] for item in all_triples]
-        unique_label, count_label = np.unique(labels, return_counts=True)
-        rate = 1.0/count_label
-        p = [rate[item[2]] for item in all_triples]
-        p = p/sum(p)
-        select_index = np.random.choice(len(all_triples), batch_size, p=p)
-        select_trip = [all_triples[i] for i in select_index]
-        return select_trip
-
-
-
 
     def elmo_transform(self, triples):
         '''
         Transform sentences into elmo, each sentence represented by words
         '''
-        token_list, mask_list, label_list, _, _ = zip(*triples)
+        token_list, mask_list, label_list, _ = zip(*triples)
         sent_lens = [len(tokens) for tokens in token_list]
         sent_lens = torch.LongTensor(sent_lens)
         label_list = torch.LongTensor(label_list)
@@ -657,7 +590,7 @@ class data_generator:
     def reset_samples(self):
         self.index = 0
 
-    def pad_data(self, sents, masks, labels, texts):
+    def pad_data(self, sents, masks, labels):
         '''
         Padding sentences to same size
         '''
@@ -680,41 +613,41 @@ class data_generator:
         sent_vecs = sent_vecs[perm_idx]
         mask_vecs = mask_vecs[perm_idx]
         label_list = label_list[perm_idx]
-        tokens = [texts[i.item()] for i in perm_idx]
-        return sent_vecs, mask_vecs, label_list, sent_lens, tokens
+        return sent_vecs, mask_vecs, label_list, sent_lens
 
-    def get_ids_samples(self, is_balanced=False):
+    def get_ids_samples(self, with_text=False):
         '''
         Get samples including ids of words, labels
         '''
         if self.is_training:
-            if is_balanced:
-                samples = self.generate_balanced_sample(self.data_batch)
-            else:
-                samples = self.generate_sample(self.data_batch)
-            tokens, mask_list, label_list, token_ids, texts = zip(*samples)
-            #Sorted according to the length
-            sent_vecs, mask_vecs, label_list, sent_lens, tokens = self.pad_data(token_ids,mask_list, label_list, texts)
+            samples = self.generate_sample(self.data_batch)
+            _, mask_list, label_list, token_ids = zip(*samples)
+            sent_vecs, mask_vecs, label_list, sent_lens = self.pad_data(token_ids,mask_list, label_list)
         else:
             if self.index == self.data_len:
                 print('Testing Over!')
             #First get batches of testing data
-            if self.data_len - self.index >= self.config.batch_size:
+            if self.data_len - self.index >= config.batch_size:
                 #print('Testing Sample Index:', self.index)
                 start = self.index
-                end = start + self.config.batch_size
+                end = start + config.batch_size
                 samples = self.data_batch[start: end]
-                self.index += self.config.batch_size
-                tokens, mask_list, label_list, token_ids, texts = zip(*samples)
-                #Sorting happens here
-                sent_vecs, mask_vecs, label_list, sent_lens, tokens = self.pad_data(token_ids, mask_list, label_list, texts)
-
+                self.index += config.batch_size
+                tokens, mask_list, label_list, token_ids = zip(*samples)
+                sent_vecs, mask_vecs, label_list, sent_lens = self.pad_data(token_ids,mask_list, label_list)
+                #Sort the lengths, and change orders accordingly
+                sent_lens, perm_idx = sent_lens.sort(0, descending=True)
+                sent_vecs = sent_vecs[perm_idx]
+                mask_vecs = mask_vecs[perm_idx]
+                label_list = label_list[perm_idx]
             else:#Then generate testing data one by one
                 samples =  self.data_batch[self.index] 
-                tokens, mask_list, label_list, token_ids, texts = zip(*[samples])
-                sent_vecs, mask_vecs, label_list, sent_lens, tokens = self.pad_data(token_ids, mask_list, label_list, texts)
+                _, mask_list, label_list, token_ids = zip(*[samples])
+                sent_vecs, mask_vecs, label_list, sent_lens = self.pad_data(token_ids,mask_list, label_list)
                 self.index += 1
-        yield sent_vecs, mask_vecs, label_list, sent_lens, tokens
+        if with_text:
+            yield sent_vecs, mask_vecs, label_list, sent_lens, tokens
+        yield sent_vecs, mask_vecs, label_list, sent_lens
 
     def get_elmo_samples(self):
         '''
@@ -734,12 +667,12 @@ class data_generator:
             if self.index == self.data_len:
                 print('Testing Over!')
             #First get batches of testing data
-            if self.data_len - self.index >= self.config.batch_size:
+            if self.data_len - self.index >= config.batch_size:
                 #print('Testing Sample Index:', self.index)
                 start = self.index
-                end = start + self.config.batch_size
+                end = start + config.batch_size
                 samples = self.data_batch[start: end]
-                self.index += self.config.batch_size
+                self.index += config.batch_size
                 sent_vecs, mask_vecs, label_list, sent_lens = self.elmo_transform(samples)
                 #Sort the lengths, and change orders accordingly
                 sent_lens, perm_idx = sent_lens.sort(0, descending=True)

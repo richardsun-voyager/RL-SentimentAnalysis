@@ -75,7 +75,7 @@ class GloveMaskCat(nn.Module):
         self.config = config
         self.word_embed = nn.Embedding(config.embed_num, config.embed_dim)
         self.mask_embed = nn.Embedding(2, config.mask_dim)
-        self.load_vector()
+        #self.load_vector()
         self.dropout = nn.Dropout(config.rnn_dropout)
 
     # input are tensors

@@ -8,7 +8,7 @@ class Config:
         self.id2action = {i:a for i, a in enumerate(self.actions)}
         #Word embeddings dimension
         self.embed_dim = 300#word embeddings
-        self.embed_num = 4436 #Number of words
+        self.embed_num = 5091 #Number of words
         self.mask_dim = 50
         #LSTM hidden state dimension
 
@@ -27,6 +27,11 @@ class Config:
         self.embed_path = "data/restaurant/vocab/local_emb.pkl"
         self.model_path = "data/models/"
         self.log_path = 'data/logs/'
+        self.pretrained_embed_path = "../data/word_embeddings/glove.6B.300d.txt"
+
+        self.train_path = "data/restaurant/train.pkl"
+        self.valid_path = "data/restaurant/valid.pkl"
+        self.test_path = "data/restaurant/test.pkl"
 
         #training optimizer
         self.batch_size = 1
@@ -37,6 +42,9 @@ class Config:
         self.l2 = 0.0001
         self.epochs= 30
         self.adjust_every = 8
+
+        #tokenization tool
+        self.is_stanford_nlp = True
 
 
     def __repr__(self):

@@ -3,6 +3,62 @@ import torch
 #from config import config
 import torch.nn as nn
 import torch.nn.functional as F
+from parse_path import constituency_path, dependency_path
+dp = dependency_path()
+cp = constituency_path()
+def convert_mask_index(masks):
+    '''
+    Find the indice of none zeros values in masks, namely the target indice
+    '''
+    target_indice = []
+    for mask in masks:
+        indice = torch.nonzero(mask == 1).squeeze(1).numpy()
+        target_indice.append(indice)
+    return target_indice
+
+def get_dependency_weight(tokens, targets, max_len):
+    '''
+    Dependency weight
+    tokens: texts
+    max_len: max length of texts
+    '''
+    weights = np.zeros([len(tokens), max_len])
+    for i, token in enumerate(tokens):
+        try:
+            graph = dp.build_graph(token)
+            mat = dp.compute_node_distance(graph, max_len)
+        except:
+            print('Error!!!!!!!!!!!!!!!!!!')
+            print(text)
+
+        try:
+            max_w, _, _ = dp.compute_soft_targets_weights(mat, targets[i])
+            weights[i, :len(max_w)] = max_w
+        except:
+            print('text process error')
+            print(text, targets[i])
+            break
+    return weights
+
+def get_context_weight(texts, targets, max_len):
+    '''
+    Constituency weight
+    '''
+    weights = np.zeros([len(texts), max_len])
+    for i, token in enumerate(texts):
+        #print('Original word num')
+        #print(len(token))
+        #text = ' '.join(token)#Connect them into a string
+        #stanford nlp cannot identify the abbreviations ending with '.' in the sentences
+
+        try:
+            max_w, min_w, a_v = cp.proceed(token, targets[i])
+            weights[i, :len(max_w)] = max_w
+        except Exception as e:
+            print(e)
+            print(token, targets[i])
+    return weights
+
 def get_target_emb(sent_vec, masks, is_average=True):
     '''
     '''
@@ -68,7 +124,7 @@ class Agent(nn.Module):
         return torch.stack(word_seq_embs)
 
 
-    def forward(self, sents, masks, labels):
+    def forward(self, sents, masks, labels, texts):
         '''
         One sentence each time
         Args:
@@ -76,30 +132,38 @@ class Agent(nn.Module):
         masks: 1, max_len
         labels:[1]
         '''
+
+        #########Initialize hidden state
         h, c = self.init_hidden()
         cell_state = c #1,1,hidden_size
         hidden_state = h #1,1,hidden_size
 
-        #Get the final output of the lstm
-        #1, max_len, hidden_dim
-        final_state, _ = self.rnn(sents)
-        #1, 1, hidden_dim
-        overall_state = final_state[0][-1].unsqueeze(0).unsqueeze(0)
+        #########Get the final output of the lstm
+        # #1, max_len, hidden_dim
+        # final_state, _ = self.rnn(sents)
+        # #1, 1, hidden_dim
+        # overall_state = final_state[0][-1].unsqueeze(0).unsqueeze(0)
 
-        #Get target embedding, average
+        ##########Get target embedding, average
         targets = get_target_emb(sents, masks)
 
-        #Get position embedding: 1, max_len, word_emb
+        ##########Get parsing weights for each sentence given a target
+        target_indice = convert_mask_index(masks)#Get target indice
+        max_len = sents.size(1)
+        weights = get_context_weight(texts, target_indice, max_len)
+
+        ############Get position embedding: 1, max_len, word_emb
         sent_pos_emb = self.get_pos_emb(sents)
         #Get average position encoding: 1, word_emb
         target_pos_emb = get_target_emb(sent_pos_emb, masks)
 
 
-        #Only one sentence will be processed each time
+        ############Only one sentence will be processed each time
         sent = sents[0]
         sent_pos_emb = sent_pos_emb[0]
         actions = []
         select_action_probs = []
+        #Select each word
         for i, word in enumerate(sent):
             #word embedding: 1, emb_dim
             word = word.view(1, -1)
@@ -112,7 +176,7 @@ class Agent(nn.Module):
 
             #state: 1*size
             word_target = torch.cat([word, targets], 1)
-            state = self.compute_current_state(overall_state, hidden_state, word_target)
+            state = self.compute_current_state(cell_state, hidden_state, word_target)
 
             p = self.predict_action_prob(state)#p is a tensor, 1*num
             action_id = self.generate_action(p[0], True)
@@ -122,12 +186,12 @@ class Agent(nn.Module):
             actions.append(action_id)
             #Update internal state, hidden_state(1, 1, hidden_size)
             hidden_state, cell_state = self.update_state(word, action_id, hidden_state, cell_state)
-        #output log probability
+        ###########output log probability
         final_h = F.dropout(hidden_state[0], p=0.5, training=self.training)
         pred = F.log_softmax(self.state2label(final_h), 1)
 
-        #final reward
-        loss = self.calculate_loss(pred, labels, actions, select_action_probs)
+        #########final reward
+        loss = self.calculate_loss(pred, labels, actions, select_action_probs, weights)
         return pred, actions, loss
 
 
@@ -144,9 +208,9 @@ class Agent(nn.Module):
 
         #Get the final output of the lstm
         #1, max_len, hidden_dim
-        final_state, _ = self.rnn(sents)
-        #1, 1, hidden_dim
-        overall_state = final_state[0][-1].unsqueeze(0).unsqueeze(0)
+        # final_state, _ = self.rnn(sents)
+        # #1, 1, hidden_dim
+        # overall_state = final_state[0][-1].unsqueeze(0).unsqueeze(0)
 
         #Get target embedding, average
         targets = get_target_emb(sents, masks)
@@ -174,7 +238,7 @@ class Agent(nn.Module):
 
             #state: 1*size
             word_target = torch.cat([word, targets], 1)
-            state = self.compute_current_state(overall_state, hidden_state, word_target)
+            state = self.compute_current_state(cell_state, hidden_state, word_target)
 
             p = self.predict_action_prob(state)#p is a tensor, 1*num
             action_id = self.generate_action(p[0], False)
@@ -199,13 +263,14 @@ class Agent(nn.Module):
         return neg_log_prob
 
 
-    def calculate_loss(self, preds, labels, actions, select_action_probs):
+    def calculate_loss(self, preds, labels, actions, select_action_probs, parse_weights):
         '''
         Calculate reward values for a sentence
         preds: probability, [1, label_size]
         labels: a list of labels, [1]
         actions:[1, sent_len]
         select_action_probs:[1, sent_len]
+        parse_weights:[1, sent_len], weights for each word given the target
         '''
         #Final reward
         delete_num = len(actions) - sum(actions)
@@ -213,9 +278,10 @@ class Agent(nn.Module):
         loss = self.get_ground_log_loss(preds, labels)#smaller, the better
         #print('Log_prob:', log_prob)
         #Reward the action that can remove words
-        reward = float(delete_num)/len(actions)#more words deleted, better
+        del_reward = float(delete_num)/len(actions)#more words deleted, better
+        parse_reward = np.sum(np.array(actions) * parse_weights)
   
-        output_loss = 2 * loss * (0.001+reward)#smaller is better
+        output_loss = 2 * loss * (0.001+ del_reward + parse_reward)#smaller is better
         #print('Reward:', reward)
         #loss in the process
         #log_select_action_probs = [item.log() for item in select_action_probs]

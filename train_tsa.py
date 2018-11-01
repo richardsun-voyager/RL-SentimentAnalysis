@@ -38,14 +38,14 @@ def train():
     best_acc = 0
     best_model = None
 
-    TRAIN_DATA_PATH = "data/2014/Restaurants_Train_v2.xml"
-    TEST_DATA_PATH = "data/2014/Restaurants_Test_Gold.xml"
-    path_list = [TRAIN_DATA_PATH, TEST_DATA_PATH]
-    #First time, need to preprocess and save the data
-    #Read XML file
+    # TRAIN_DATA_PATH = "data/restaurant/Restaurants_Train_v2.xml"
+    # TEST_DATA_PATH = "data/restaurant/Restaurants_Test_Gold.xml"
+    # path_list = [TRAIN_DATA_PATH, TEST_DATA_PATH]
+    # #First time, need to preprocess and save the data
+    # #Read XML file
     # dr = data_reader(config)
     # dr.read_train_test_data(path_list)
-    #print('Data Preprocessed!')
+    # print('Data Preprocessed!')
 
 
 
@@ -57,14 +57,18 @@ def train():
     dg_test =data_generator(config, test_data, False)
 
 
-    if os.path.exists(config.model_path+'rl_model.pt'):
-        print('Loading pretrained model....')
-        model = torch.load(config.model_path+'rl_model.pt')
-    else:
-        model = Agent(config)
+    # if os.path.exists(config.model_path+'rl_model.pt'):
+    #     print('Loading pretrained model....')
+    #     model = torch.load(config.model_path+'rl_model.pt')
+    # else:
+    #     model = Agent(config)
 
-    visualize_samples(dg_train, model)
-    sys.exit()
+    # visualize_samples(dg_train, model)
+    # sys.exit()
+
+    cat_layer.load_vector()
+
+    model = Agent(config)
 
     if config.if_gpu: model = model.cuda()
     parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -87,11 +91,11 @@ def train():
             #Accumulate gradients
             #One sentence each time
             for _ in np.arange(batch):
-                sent_vecs, mask_vecs, label_list, sent_lens = next(dg_train.get_ids_samples())
+                sent_vecs, mask_vecs, label_list, sent_lens, texts = next(dg_train.get_ids_samples())
                 #Get embeddings for the sentence and the target, no concatenation
                 sent_vecs, target_vecs = cat_layer(sent_vecs, mask_vecs, False)
                 #Pass target vectors to the model
-                _, actions, loss = model(sent_vecs, mask_vecs, label_list)
+                _, actions, loss = model(sent_vecs, mask_vecs, label_list, texts)
                 total_loss += loss
             total_loss /= batch
             total_loss.backward()
@@ -142,7 +146,7 @@ def evaluate_test(dr_test, model):
     all_counter = 0
     correct_count = 0
     while dr_test.index < dr_test.data_len:
-        sent_vecs, mask_vecs, label, sent_len = next(dr_test.get_ids_samples())
+        sent_vecs, mask_vecs, label, sent_len, texts = next(dr_test.get_ids_samples())
         sent, target = cat_layer(sent_vecs, mask_vecs, False)
         if config.if_gpu: 
             sent, target = sent.cuda(), target.cuda()
