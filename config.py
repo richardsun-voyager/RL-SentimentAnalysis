@@ -11,7 +11,10 @@ class Config:
         self.embed_num = 5091 #Number of words
         self.mask_dim = 50
         #LSTM hidden state dimension
-
+        
+        
+        
+        #rnn    
         self.hidden_dim = 256
         self.layer_num = 1
         self.rnn_dropout = 0.0
@@ -27,7 +30,7 @@ class Config:
         self.embed_path = "data/restaurant/vocab/local_emb.pkl"
         self.model_path = "data/models/"
         self.log_path = 'data/logs/'
-        self.pretrained_embed_path = "../data/word_embeddings/glove.6B.300d.txt"
+        self.pretrained_embed_path = "../data/glove.840B.300d.txt"
 
         self.train_path = "data/restaurant/train.pkl"
         self.valid_path = "data/restaurant/valid.pkl"
@@ -36,11 +39,12 @@ class Config:
         #training optimizer
         self.batch_size = 1
         self.opt = 'Adam'
+        self.dropout = 0.5
         self.if_update_embed = False
         self.if_gpu = False
         self.lr = 0.0001
         self.l2 = 0.0001
-        self.epochs= 30
+        self.epochs= 100
         self.adjust_every = 8
 
         #tokenization tool

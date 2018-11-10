@@ -1,6 +1,6 @@
 #!/usr/bin/python
 from __future__ import division
-from Agent import *
+from Agent5 import *
 from data_reader_general import *
 from config import config 
 from Layer import GloveMaskCat
@@ -57,14 +57,14 @@ def train():
     dg_test =data_generator(config, test_data, False)
 
 
-    # if os.path.exists(config.model_path+'rl_model.pt'):
-    #     print('Loading pretrained model....')
-    #     model = torch.load(config.model_path+'rl_model.pt')
-    # else:
-    #     model = Agent(config)
+#     if os.path.exists(config.model_path+'rl_model.pt'):
+#         print('Loading pretrained model....')
+#         model = torch.load(config.model_path+'rl_model.pt')
+#     else:
+#         model = Agent(config)
 
-    # visualize_samples(dg_train, model)
-    # sys.exit()
+#     visualize_samples(dg_train, model)
+#     sys.exit()
 
     cat_layer.load_vector()
 
@@ -83,11 +83,12 @@ def train():
         print('Epoch:', e)
         model.train()
         dg_train.reset_samples()
-        batch = 16
+        batch = 32
         iter_num =int(loops/batch)
         for i in range(iter_num):
             optimizer.zero_grad()
-            total_loss = 0
+            total_loss1 = 0
+            total_loss2 = 0
             #Accumulate gradients
             #One sentence each time
             for _ in np.arange(batch):
@@ -95,14 +96,18 @@ def train():
                 #Get embeddings for the sentence and the target, no concatenation
                 sent_vecs, target_vecs = cat_layer(sent_vecs, mask_vecs, False)
                 #Pass target vectors to the model
-                _, actions, loss = model(sent_vecs, mask_vecs, label_list, texts)
-                total_loss += loss
-            total_loss /= batch
-            total_loss.backward()
+                _, actions, action_loss, classify_loss = model(sent_vecs, mask_vecs, label_list, texts)
+                total_loss1 += action_loss
+                total_loss2 += classify_loss
+            total_loss1 = total_loss1/batch
+            total_loss2 = total_loss2/batch
+            total_loss1.backward(retain_graph=True)
+            total_loss2.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.clip_norm, norm_type=2)
             optimizer.step()
             if i %20 == 0:
-                print(total_loss)
+                print('Action Loss:', total_loss1)
+                print('Classification Loss:', total_loss2)
         
         acc = evaluate_test(dg_test, model)
         with open(config.log_path+'rl_log.txt', 'a') as f:
@@ -112,8 +117,8 @@ def train():
 
         if acc > best_acc: 
             best_acc = acc
-            best_model = copy.deepcopy(model)
-            torch.save(best_model, config.model_path+'rl_model.pt')
+            #best_model = copy.deepcopy(model)
+            torch.save(model.state_dict(), config.model_path+'rl_model.pt')
 
 def visualize_samples(dr_test, model):
     '''
@@ -123,21 +128,22 @@ def visualize_samples(dr_test, model):
     dr_test.reset_samples()
     model.eval()
     all_counter = 0
-    while all_counter < 10:
+    while all_counter < 30:
         all_counter += 1
-        sent_vecs, mask_vecs, label, sent_len = next(dr_test.get_ids_samples())
+        sent_vecs, mask_vecs, label, sent_len, texts = next(dr_test.get_ids_samples())
         sent, target = cat_layer(sent_vecs, mask_vecs)
         if config.if_gpu: 
             sent, target = sent.cuda(), target.cuda()
             label, sent_len = label.cuda(), sent_len.cuda()
-        _, actions  = model.predict(sent, mask_vecs) 
-        print('*'*20)
-        #print(tokens)
-        print('Targets:')
-        print(mask_vecs)
-        print('Label:', label)
-        print('Actions:')
-        print(actions)
+        pred_label, actions  = model.predict(sent, mask_vecs) 
+        if pred_label[0] != label[0]:
+            print('*'*20)
+            print(texts)
+            print('Targets:')
+            print(mask_vecs)
+            print('Label:', label)
+            print('Actions:')
+            print(actions)
 
 def evaluate_test(dr_test, model):
     print("Evaluting")

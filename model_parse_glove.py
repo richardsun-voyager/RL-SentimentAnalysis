@@ -22,7 +22,7 @@ class MLSTM(nn.Module):
         self.config = config
         #The concatenated word embedding and target embedding as input
         self.rnn = nn.LSTM(config.embed_dim , int(config.l_hidden_size / 2), batch_first=True, num_layers = int(config.l_num_layers / 2),
-            bidirectional=True, dropout=config.l_dropout)
+            bidirectional=True, dropout=config.rnn_dropout)
         init_ortho(self.rnn)
 
     # batch_size * sent_l * dim
@@ -61,7 +61,7 @@ class depTSA(nn.Module):
 
         self.lstm = MLSTM(config)
         self.target2vec = nn.Linear(config.embed_dim, config.l_hidden_size)
-        self.vec2label = nn.Linear(config.embed_dim, 3)
+        self.vec2label = nn.Linear(config.l_hidden_size, 3)
         self.concatvec_linear = nn.Linear(2*config.l_hidden_size, 1)
 
         self.cri = nn.CrossEntropyLoss()
@@ -81,9 +81,11 @@ class depTSA(nn.Module):
 
         #Get the target embedding
         #batch_size, sent_len, dim = sent.size()
+        #batch_size, sent_len, hidden_dim
+        context = self.lstm(sent, lens)
         weights = weights.unsqueeze(1)#batch_size*1*max_len
 
-        sents_vec = torch.bmm(weights, sent).squeeze(1)#Batch_size*hidden_dim
+        sents_vec = torch.bmm(weights, context).squeeze(1)#Batch_size*hidden_dim
         
         #Dropout
         if self.training:
@@ -97,6 +99,7 @@ class depTSA(nn.Module):
    
     def forward(self, sent, weights, label, lens):
         #Sent emb_dim + 50
+        
         
         sent = F.dropout(sent, p=0.2, training=self.training)
         scores, _ = self.compute_score(sent, weights, lens)

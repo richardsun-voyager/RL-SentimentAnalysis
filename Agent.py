@@ -82,15 +82,24 @@ class Agent(nn.Module):
         self.actions = config.actions
         self.action_num = len(self.actions)
         self.action_ids = list(range(len(self.actions)))
+        
+        #functions to generate state
+        self.hidden_state2temp = nn.Linear(config.hidden_dim*2, 128)
+        self.word_emb2temp = nn.Linear(config.embed_dim*2, 128)
+        
+        
         #Map state into action probability
-        self.state2temp = nn.Linear(config.hidden_dim*2+2*config.embed_dim, 256)
-        self.temp2action = nn.Linear(256, self.action_num)
+        #self.state2temp = nn.Linear(config.hidden_dim*2+2*config.embed_dim, 256)
+        self.state2temp = nn.Linear(256, self.action_num)
         self.activation = nn.Sigmoid()
-        self.state2action = nn.Sequential(self.state2temp, self.activation, self.temp2action, self.activation)
+        self.state2action = nn.Sequential(self.state2temp, self.activation)
 
         #Lstm
         self.rnn = nn.LSTM(config.embed_dim, int(config.hidden_dim), batch_first=True, num_layers= config.layer_num, bidirectional=False, dropout=config.rnn_dropout)
         self.rnn_critic = nn.LSTM(config.embed_dim, int(config.hidden_dim), batch_first=True, num_layers= config.layer_num, bidirectional=False, dropout=config.rnn_dropout)
+        self.birnn = nn.LSTM(config.embed_dim, int(config.hidden_dim/2), batch_first=True, num_layers= config.layer_num, bidirectional=True, dropout=config.rnn_dropout)
+        
+        #
 
         self.state2label = nn.Linear(config.hidden_dim, config.label_num)
 
@@ -122,6 +131,19 @@ class Agent(nn.Module):
             word_seq_emb = self.position_enc(word_seq)
             word_seq_embs.append(word_seq_emb)
         return torch.stack(word_seq_embs)
+    
+    def get_overall_final_state(self, texts):
+        '''
+        Get the hidden state for the original sentence
+        Args:
+        texts: a tensor of texts, batch_size, max_len, embed_dim
+        '''
+        # #1, max_len, hidden_dim
+        _, (h, c) = self.birnn(texts)
+        #1, 1, hidden_dim
+        batch_size = texts.size(0)
+        overall_state = h.view(batch_size, -1)
+        return overall_state
 
 
     def forward(self, sents, masks, labels, texts):
@@ -139,10 +161,9 @@ class Agent(nn.Module):
         hidden_state = h #1,1,hidden_size
 
         #########Get the final output of the lstm
-        # #1, max_len, hidden_dim
-        # final_state, _ = self.rnn(sents)
-        # #1, 1, hidden_dim
-        # overall_state = final_state[0][-1].unsqueeze(0).unsqueeze(0)
+        #batch_size, hidden_dim
+        overall_state = self.get_overall_final_state(sents)
+
 
         ##########Get target embedding, average
         targets = get_target_emb(sents, masks)
@@ -176,7 +197,7 @@ class Agent(nn.Module):
 
             #state: 1*size
             word_target = torch.cat([word, targets], 1)
-            state = self.compute_current_state(cell_state, hidden_state, word_target)
+            state = self.compute_current_state(overall_state, hidden_state, word_target)
 
             p = self.predict_action_prob(state)#p is a tensor, 1*num
             action_id = self.generate_action(p[0], True)
@@ -206,11 +227,9 @@ class Agent(nn.Module):
         cell_state = c #1,1,hidden_size
         hidden_state = h #1,1,hidden_size
 
-        #Get the final output of the lstm
-        #1, max_len, hidden_dim
-        # final_state, _ = self.rnn(sents)
-        # #1, 1, hidden_dim
-        # overall_state = final_state[0][-1].unsqueeze(0).unsqueeze(0)
+        #########Get the final output of the lstm
+        #batch_size, hidden_dim
+        overall_state = self.get_overall_final_state(sents)
 
         #Get target embedding, average
         targets = get_target_emb(sents, masks)
@@ -238,7 +257,7 @@ class Agent(nn.Module):
 
             #state: 1*size
             word_target = torch.cat([word, targets], 1)
-            state = self.compute_current_state(cell_state, hidden_state, word_target)
+            state = self.compute_current_state(overall_state, hidden_state, word_target)
 
             p = self.predict_action_prob(state)#p is a tensor, 1*num
             action_id = self.generate_action(p[0], False)
@@ -278,10 +297,10 @@ class Agent(nn.Module):
         loss = self.get_ground_log_loss(preds, labels)#smaller, the better
         #print('Log_prob:', log_prob)
         #Reward the action that can remove words
-        del_reward = float(delete_num)/len(actions)#more words deleted, better
+        del_reward = float(delete_num)/2#len(actions)#more words deleted, better
         parse_reward = np.sum(np.array(actions) * parse_weights)
   
-        output_loss = 2 * loss * (0.001+ del_reward + parse_reward)#smaller is better
+        output_loss = loss * (del_reward + parse_reward)#smaller is better
         #print('Reward:', reward)
         #loss in the process
         #log_select_action_probs = [item.log() for item in select_action_probs]
@@ -313,11 +332,12 @@ class Agent(nn.Module):
         assert self.action_num == len(p)
         if training:
             #Consider exploration and exploitation
-            t = np.random.rand()
-            if t > self.config.epsilon:
-                action_id = np.random.choice(self.action_ids, p=p)
-            else:#Exploration
-                action_id = np.random.choice(self.action_ids)
+            action_id = np.random.choice(self.action_ids, p=p)
+#             t = np.random.rand()
+#             if t > self.config.epsilon:
+#                 action_id = np.random.choice(self.action_ids, p=p)
+#             else:#Exploration
+#                 action_id = np.random.choice(self.action_ids)
         else:#In testing part, just choose the max prob one
             action_id = np.argmax(p)
         return action_id
@@ -349,12 +369,18 @@ class Agent(nn.Module):
         '''
         Compute current state
         Args:
-        cell_state: 1, 1, hidden_dim
+        overall_state: 1,  hidden_dim
         hidden_state: 1, 1, hidden_dim
         current_input: 1, word_dim*2
         '''
-        current_state = torch.cat([overall_hidden_state[0], pre_hidden_state[0], current_input], 1)
+        intern_state = torch.cat([overall_hidden_state, pre_hidden_state[0]], 1)
+        #Map them to the same dimension
+        intern_state = self.hidden_state2temp(intern_state)
+        word_state = self.word_emb2temp(current_input)
+        
+        current_state = torch.cat([intern_state, word_state], 1)
         return current_state
+    
 
     def position_encoding_init(self, n_position, emb_dim):
         ''' Init the sinusoid position encoding table '''

@@ -3,7 +3,7 @@ from __future__ import division
 from model_parse_glove import *
 from data_reader_general import *
 from parse_path import dependency_path, constituency_path
-from configs.config_parse import config
+from config_parse import config
 import pickle
 from Layer import GloveMaskCat
 import numpy as np
@@ -53,6 +53,7 @@ def convert_mask_index(masks):
 
 def get_dependency_weight(tokens, targets, max_len):
     '''
+    Dependency weight
     tokens: texts
     max_len: max length of texts
     '''
@@ -72,11 +73,14 @@ def get_dependency_weight(tokens, targets, max_len):
             print('text process error')
             print(text, targets[i])
             break
-    return torch.FloatTensor(weights)
+    return weights
 
-def get_context_weight(tokens, targets, max_len):
-    weights = np.zeros([len(tokens), max_len])
-    for i, token in enumerate(tokens):
+def get_context_weight(texts, targets, max_len):
+    '''
+    Constituency weight
+    '''
+    weights = np.zeros([len(texts), max_len])
+    for i, token in enumerate(texts):
         #print('Original word num')
         #print(len(token))
         #text = ' '.join(token)#Connect them into a string
@@ -88,7 +92,7 @@ def get_context_weight(tokens, targets, max_len):
         except Exception as e:
             print(e)
             print(token, targets[i])
-    return torch.FloatTensor(weights)
+    return weights
 
 
 def train():
@@ -97,17 +101,17 @@ def train():
     best_model = None
 
     # #Load and preprocess raw dataset
-    # TRAIN_DATA_PATH = "data/2014/Restaurants_Train_v2.xml"
-    # TEST_DATA_PATH = "data/2014/Restaurants_Test_Gold.xml"
-    # path_list = [TRAIN_DATA_PATH, TEST_DATA_PATH]
-    # #First time, need to preprocess and save the data
-    # #Read XML file
-    # dr = data_reader(config)
-    # dr.read_train_test_data(path_list)
-    # print('Data Preprocessed!')
-    # dr = data_reader(config)
-    # train_data = dr.load_data(config.data_path+'Restaurants_Train_v2.xml.pkl')
-    # dr.split_save_data(config.train_path, config.valid_path)
+#     TRAIN_DATA_PATH = "data/2014/Restaurants_Train_v2.xml"
+#     TEST_DATA_PATH = "data/2014/Restaurants_Test_Gold.xml"
+#     path_list = [TRAIN_DATA_PATH, TEST_DATA_PATH]
+#     #First time, need to preprocess and save the data
+#     #Read XML file
+#     dr = data_reader(config)
+#     dr.read_train_test_data(path_list)
+#     print('Data Preprocessed!')
+#     dr = data_reader(config)
+#     train_data = dr.load_data(config.data_path+'Restaurants_Train_v2.xml.pkl')
+#     dr.split_save_data(config.train_path, config.valid_path)
 
 
 
@@ -128,6 +132,13 @@ def train():
     # dr_test = dr_valid
     # dr_test = data_reader(config, False)
     # dr_test.load_data(config.test_path)
+    
+#     dr = data_reader(config)
+#     train_data = dr.load_data(config.data_path+'Restaurants_Train_v2.xml.pkl')
+#     test_data = dr.load_data(config.data_path+'Restaurants_Test_Gold.xml.pkl')
+#     dg_train = data_generator(config, train_data, False)
+#     dg_test =data_generator(config, test_data, False)
+    
 
     
 
@@ -159,6 +170,7 @@ def train():
             max_len = max(sent_lens).item()
            #weights = get_dependency_weight(tokens, target_indice, max_len)#Get weights for each sentence
             weights = get_context_weight(tokens, target_indice, max_len)
+            weights = torch.FloatTensor(weights)
             sent_vecs, target_avg = cat_layer(sent_vecs, mask_vecs)#Batch_size*max_len*(2*emb_size)
             if config.if_gpu: 
                 sent_vecs, target_avg = sent_vecs.cuda(), target_avg.cuda()
