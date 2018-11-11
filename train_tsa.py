@@ -1,6 +1,6 @@
 #!/usr/bin/python
 from __future__ import division
-from Agent5 import *
+from Agent6 import *
 from data_reader_general import *
 from config import config 
 from Layer import GloveMaskCat

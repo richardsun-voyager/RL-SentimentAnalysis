@@ -42,7 +42,7 @@ class MLSTM(nn.Module):
         
         
         #assert self.batch_size == batch_size
-        lstm_out, _ = self.rnn(pack)
+        lstm_out, (h, c) = self.rnn(pack)
         #lstm_out, (hid_states, cell_states) = self.rnn(feats)
 
         #Unpack the tensor, get the output for varied-size sentences
@@ -51,7 +51,7 @@ class MLSTM(nn.Module):
         #FIXIT: for batch
         #lstm_out = lstm_out.squeeze(0)
         # batch * sent_l * 2 * hidden_states 
-        return unpacked
+        return unpacked, h
 
 # consits of three components
 class depTSA(nn.Module):
@@ -78,11 +78,14 @@ class depTSA(nn.Module):
         weights: batch_size*max_len
         label: a list labels
         '''
+#         batch_size, max_len, emb_dim = sent.size()
+#         weights_exp = weights.expand_dim(emb_dim, batch_size, max_len).transpose(0, 1).transpose(1, 2) 
+#         sent = sent * weights_exp
 
         #Get the target embedding
         #batch_size, sent_len, dim = sent.size()
         #batch_size, sent_len, hidden_dim
-        context = self.lstm(sent, lens)
+        context, h = self.lstm(sent, lens)
         weights = weights.unsqueeze(1)#batch_size*1*max_len
 
         sents_vec = torch.bmm(weights, context).squeeze(1)#Batch_size*hidden_dim

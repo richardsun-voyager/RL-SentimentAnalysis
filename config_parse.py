@@ -26,7 +26,7 @@ class Config():
         self.opt = "Adam"
         self.dropout = 0.5
         self.epoch = 30
-        self.lr = 0.01/ self.batch_size
+        self.lr = 0.2/ self.batch_size
         self.l2 = 0.0
         self.adjust_every = 8
         self.clip_norm = 3
@@ -41,7 +41,7 @@ class Config():
         # self.dic_path = "data/2014/dic.pkl"
 
         #################Restaurant
-        self.pretrained_embed_path = "../data/word_embeddings/glove.6B.300d.txt"
+        self.pretrained_embed_path = "../data/glove.840B.300d.txt"
         self.embed_path = "data/restaurant/vocab/local_emb.pkl"
         self.data_path = "data/restaurant/"
         self.train_path = "data/restaurant/train.pkl"

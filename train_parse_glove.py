@@ -89,10 +89,25 @@ def get_context_weight(texts, targets, max_len):
         try:
             max_w, min_w, a_v = cp.proceed(token, targets[i])
             weights[i, :len(max_w)] = max_w
+            weights = np.where(weights>0.3, weights, 0)
         except Exception as e:
             print(e)
             print(token, targets[i])
     return weights
+
+def extract_words(sents, weights, sent_lens):
+    '''
+    sents: batch_size*sent_len*word_dim
+    '''
+    sent_vecs = torch.zeros(sents.size())
+    for i, weight in enumerate(weights):
+        indices = np.nonzero(weight)[0]
+        sent_vecs[i][:len(indices)] = sents[i][indices]
+        sent_lens[i] = torch.LongTensor(len(indices))
+        
+    return sent_vecs, sent_lens
+        
+        
 
 
 def train():
@@ -165,7 +180,7 @@ def train():
 
         for _ in np.arange(loops):
             model.zero_grad() 
-            sent_vecs, mask_vecs, label_list, sent_lens, tokens = next(dg_train.get_ids_samples())
+            sent_vecs, mask_vecs, label_list, sent_lens, tokens = next(dg_train.get_ids_samples(True))
             target_indice = convert_mask_index(mask_vecs)#Get target indice
             max_len = max(sent_lens).item()
            #weights = get_dependency_weight(tokens, target_indice, max_len)#Get weights for each sentence
@@ -233,6 +248,7 @@ def evaluate_test(dr_test, model):
         max_len = max(sent_lens).item()
         weights = get_context_weight(tokens, target_indice, max_len)#Get weights for each sentence
         sent_vecs, target_avg = cat_layer(sent_vecs, mask_vecs)#Batch_size*max_len*(2*emb_size)
+        weights = torch.FloatTensor(weights)
         if config.if_gpu: 
             sent_vecs, target_avg = sent_vecs.cuda(), target_avg.cuda()
             label_list, sent_lens = label_list.cuda(), sent_lens.cuda()

@@ -74,7 +74,6 @@ class dataHelper():
             sent_Inst = SentInst(sent_id, sent_text, None, None, opinion_list)
             sentence_list.append(sent_Inst)
         return sentence_list
-        
     
     def read_xml_data(self, file_name):
         '''
