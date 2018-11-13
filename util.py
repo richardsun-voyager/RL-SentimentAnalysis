@@ -1,10 +1,80 @@
 from collections import namedtuple
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 import pdb
+
+from parse_path import constituency_path, dependency_path
+dp = dependency_path()
+cp = constituency_path()
+def convert_mask_index(masks):
+    '''
+    Find the indice of none zeros values in masks, namely the target indice
+    '''
+    target_indice = []
+    for mask in masks:
+        indice = torch.nonzero(mask == 1).squeeze(1).numpy()
+        target_indice.append(indice)
+    return target_indice
+
+def get_dependency_weight(tokens, targets, max_len):
+    '''
+    Dependency weight
+    tokens: texts
+    max_len: max length of texts
+    '''
+    weights = np.zeros([len(tokens), max_len])
+    for i, token in enumerate(tokens):
+        try:
+            graph = dp.build_graph(token)
+            mat = dp.compute_node_distance(graph, max_len)
+        except:
+            print('Error!!!!!!!!!!!!!!!!!!')
+            print(text)
+
+        try:
+            max_w, _, _ = dp.compute_soft_targets_weights(mat, targets[i])
+            weights[i, :len(max_w)] = max_w
+        except:
+            print('text process error')
+            print(text, targets[i])
+            break
+    return weights
+
+def get_context_weight(texts, targets, max_len):
+    '''
+    Constituency weight
+    '''
+    weights = np.zeros([len(texts), max_len])
+    for i, token in enumerate(texts):
+        #print('Original word num')
+        #print(len(token))
+        #text = ' '.join(token)#Connect them into a string
+        #stanford nlp cannot identify the abbreviations ending with '.' in the sentences
+
+        try:
+            max_w, min_w, a_v = cp.proceed(token, targets[i])
+            weights[i, :len(max_w)] = max_w
+        except Exception as e:
+            print(e)
+            print(token, targets[i])
+    return weights
+
+def get_target_emb(sent_vec, masks, is_average=True):
+    '''
+    '''
+    batch_size, max_len, embed_dim = sent_vec.size()
+    masks = masks.type_as(sent_vec)
+    masks = masks.expand(embed_dim, batch_size, max_len)
+    masks = masks.transpose(0, 1).transpose(1, 2)#The same size as sentence vector
+    target_emb = sent_vec * masks
+    if is_average:
+        target_emb_avg = torch.sum(target_emb, 1)/torch.sum(masks, 1)#Batch_size*embedding
+        return target_emb_avg
+    return target_emb
 
 def to_scalar(var):
     # returns a python float

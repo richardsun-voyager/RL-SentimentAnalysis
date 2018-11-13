@@ -1,76 +1,16 @@
 import numpy as np
 import torch
+from torch.nn import utils as nn_utils
 #from config import config
 import torch.nn as nn
 import torch.nn.functional as F
-from parse_path import constituency_path, dependency_path
-dp = dependency_path()
-cp = constituency_path()
-def convert_mask_index(masks):
-    '''
-    Find the indice of none zeros values in masks, namely the target indice
-    '''
-    target_indice = []
-    for mask in masks:
-        indice = torch.nonzero(mask == 1).squeeze(1).numpy()
-        target_indice.append(indice)
-    return target_indice
-
-def get_dependency_weight(tokens, targets, max_len):
-    '''
-    Dependency weight
-    tokens: texts
-    max_len: max length of texts
-    '''
-    weights = np.zeros([len(tokens), max_len])
-    for i, token in enumerate(tokens):
-        try:
-            graph = dp.build_graph(token)
-            mat = dp.compute_node_distance(graph, max_len)
-        except:
-            print('Error!!!!!!!!!!!!!!!!!!')
-            print(text)
-
-        try:
-            max_w, _, _ = dp.compute_soft_targets_weights(mat, targets[i])
-            weights[i, :len(max_w)] = max_w
-        except:
-            print('text process error')
-            print(text, targets[i])
-            break
-    return weights
-
-def get_context_weight(texts, targets, max_len):
-    '''
-    Constituency weight
-    '''
-    weights = np.zeros([len(texts), max_len])
-    for i, token in enumerate(texts):
-        #print('Original word num')
-        #print(len(token))
-        #text = ' '.join(token)#Connect them into a string
-        #stanford nlp cannot identify the abbreviations ending with '.' in the sentences
-
-        try:
-            max_w, min_w, a_v = cp.proceed(token, targets[i])
-            weights[i, :len(max_w)] = max_w
-        except Exception as e:
-            print(e)
-            print(token, targets[i])
-    return weights
-
-def get_target_emb(sent_vec, masks, is_average=True):
-    '''
-    '''
-    batch_size, max_len, embed_dim = sent_vec.size()
-    masks = masks.type_as(sent_vec)
-    masks = masks.expand(embed_dim, batch_size, max_len)
-    masks = masks.transpose(0, 1).transpose(1, 2)#The same size as sentence vector
-    target_emb = sent_vec * masks
-    if is_average:
-        target_emb_avg = torch.sum(target_emb, 1)/torch.sum(masks, 1)#Batch_size*embedding
-        return target_emb_avg
-    return target_emb
+from util import *
+import torch.nn.init as init
+from torch.distributions import Categorical
+def init_ortho(module):
+    for weight_ in module.parameters():
+        if len(weight_.size()) == 2:
+            init.orthogonal_(weight_)
 
 class Env(nn.Module):
     def __init__(self, config):
@@ -80,23 +20,39 @@ class Env(nn.Module):
         super(Env, self).__init__()
         self.config = config
         
-        
+        #Current state
         self.observation = {}
         
         #output states of RNNs
         self.cell_state = None
         self.hidden_state = None
+        
+        #biRNN outputs
         self.contexts = None
+        
+        #Parsing weights for each word
+        self.weights = None
     
         #Encode the entire sentence
         self.birnn = nn.LSTM(config.embed_dim, int(config.hidden_dim/2), batch_first=True, num_layers= config.layer_num, bidirectional=True, dropout=config.rnn_dropout)
         #Compress the sentence
         self.rnn = nn.LSTM(config.embed_dim, config.hidden_dim, batch_first=True, num_layers= config.layer_num, bidirectional=False, dropout=config.rnn_dropout)
         
+        init_ortho(self.rnn)
+        init_ortho(self.birnn)
         
-    def forward(self):
-        pass
-    
+    def init_env(self, sents, masks, texts=None):
+        '''
+        Initialize the enviroment
+        Args:
+        sents: sequence of word idx
+        texts: origin texts
+        '''
+        self.init_hidden()
+        self.get_sent_context_state(sents)
+        max_len = sents.size(1)
+        if texts:
+            self.get_parsing_weights(texts, masks, max_len)
     
     def step(self, action):
         observation = None
@@ -104,31 +60,18 @@ class Env(nn.Module):
         done = None
         return observation, reward, done
         
-    
-    
-    def generate_reward(self, preds, labels, actions, action_probs, parse_weights):
-        #Final reward
-        delete_num = len(actions) - sum(actions)
-        #loss for the gold ground
-        classification_loss = self.log_loss(preds, labels)
-        ground_truth_prob = -classification_loss.detach().numpy()#negative, the bigger the better
-        #print('Log_prob:', log_prob)
-        #Reward the action that can remove words
-        del_reward = float(delete_num)/2#len(actions)#more words deleted, better
-        parse_reward = np.sum(np.array(actions) * parse_weights)
-        reward = ground_truth_prob*3 + del_reward + parse_reward
-        return reward
-
-
-    
-    def log_loss(self, preds, labels):
+    def get_parsing_weights(self, texts, masks, max_len):
         '''
-        Calculate the log_prob for the gold label
-        logP(y=cg|X)
+        Get sentence's parsing weights according to the target
+        Args:
+        sents: [batch_size, len], texts
+        masks: [batch_size, len], binary
         '''
-        loss = nn.NLLLoss()
-        neg_log_prob = loss(preds, labels)#the smaller the better, positive
-        return neg_log_prob
+        ##########Get parsing weights for each sentence given a target
+        target_indice = convert_mask_index(masks)#Get target indice
+        weights = get_context_weight(texts, target_indice, max_len)
+        #Not differentiable
+        self.weights = weights
     
     def init_hidden(self):
         '''
@@ -138,38 +81,35 @@ class Env(nn.Module):
         h = torch.zeros(1, 1, size)
         c = torch.zeros(1, 1, size)
         self.hidden_state, self.cell_state = h, c
-
-    
-    def init_rnn_state(self, texts):
-        '''
-        Get the hidden state for the original sentence
-        Args:
-        texts: a tensor of texts, batch_size, max_len, embed_dim
-        '''
-        # #1, max_len, hidden_dim
-        _, (h, c) = self.birnn(texts)
-        #1, 1, hidden_dim
-        batch_size = texts.size(0)
-        h = h.view(batch_size, 1, -1)
-        c = c.view(batch_size, 1, -1)
-        #overall_state = h.view(batch_size, -1)
-        self.hidden_state, self.cell_state = h, c
         
-    def get_sent_context_state(self, texts):
+    def generate_reward(self, action, pos):
+        '''
+        Give reward for an action
+        '''
+        if action == 1:
+            parse_reward = self.weights[0][pos]
+            del_reward = 0
+        else:
+            parse_reward = 0
+            del_reward = 0.1
+        return del_reward+parse_reward
+
+        
+    def get_sent_context_state(self, sents):
         '''
         Get the hidden state for the original sentence
         Args:
         texts: a tensor of texts, batch_size, max_len, embed_dim
         '''
         # #1, max_len, hidden_dim
-        contexts, _ = self.birnn(texts)
+        contexts, _ = self.birnn(sents)
         #1, 1, hidden_dim
         self.contexts = contexts
         
         
     
     #Note the state should be non-differentiable
-    def get_current_state(self, pos, current_word, current_pos, target, target_pos):
+    def set_current_state(self, pos, current_word, current_pos, target, target_pos):
         '''
         Compute current state, just concatenate vectors because we don't introduce variables here.
         It plays role as the environment.
@@ -179,15 +119,16 @@ class Env(nn.Module):
         hidden_state: 1, 1, hidden_dim
         current_input: 1, word_dim*2
         '''
-        self.observation['current_context'] = self.contexts[0][pos].view(1, -1).detach()#1, hidden_size
-        self.observation['current_hidden'] = self.hidden_state[0].detach()#1, hidden_size
-        self.observation['current_cell'] = self.cell_state[0].detach()#1, hidden_size
-        self.observation['current_word'] = current_word.detach()#1, word_dim
-        self.observation['target'] = target.detach()#1, word_dim
-        self.observation['current_pos'] = current_pos.detach()#1, word_dim
-        self.observation['target_pos'] = target_pos.detach()#1, word_dim
+        self.observation['current_context'] = self.contexts[0][pos].view(1, -1)#1, hidden_size
+        self.observation['current_hidden'] = self.hidden_state[0]#1, hidden_size
+        self.observation['current_cell'] = self.cell_state[0]#1, hidden_size
+        self.observation['current_word'] = current_word#1, word_dim
+        self.observation['target'] = target#1, word_dim
+        self.observation['current_pos'] = current_pos#1, word_dim
+        self.observation['target_pos'] = target_pos#1, word_dim
         #Note, for policy network, state is generated by the environment, no gadients propagation
-        return self.observation
+        with torch.no_grad():
+            return self.observation
     
     def update_state(self, current_word, current_action):
         '''
@@ -221,7 +162,7 @@ class Policy_network(nn.Module):
         self.actions = config.actions
         self.action_num = len(self.actions)
         self.action_ids = list(range(len(self.actions)))
-        #Functions
+        #Functions, with parameters to be learned
         self.activation = nn.Tanh()
         self.enc2temp = nn.Linear(config.hidden_dim, 128)
         self.hidden2temp = nn.Linear(config.hidden_dim, 128)
@@ -293,14 +234,10 @@ class Agent(nn.Module):
 
         #########Get the final output of the lstm
         #encode the whole sentence
-        self.env.init_hidden()
-        self.env.get_sent_context_state(sents)
+        self.env.init_env(sents, masks, texts)
 
         ##########Get target embedding, average
         targets = get_target_emb(sents, masks)
-        max_len = sents.size(1)
-        weights = self.get_parsing_weights(texts, masks, max_len)
-        #weights = weights.detach()
 
         ############Get position embedding: 1, max_len, word_emb
         sent_pos_emb = self.get_pos_emb(sents)
@@ -311,7 +248,7 @@ class Agent(nn.Module):
         sent = sents[0]
         sent_pos_emb = sent_pos_emb[0]
         actions = []
-        action_probs = []
+        action_loss = []
         #Select each word
         for i, word in enumerate(sent):
             #word embedding: 1, emb_dim
@@ -325,16 +262,22 @@ class Agent(nn.Module):
 
             
             #Get the state, not differentiable for the action
-            observation = self.env.get_current_state(i, word, pos_emb, targets, target_pos_emb)
+            observation = self.env.set_current_state(i, word, pos_emb, targets, target_pos_emb)
+            
             p = self.pnet(observation)#p is a tensor, 1*num
-            action_id = self.generate_action(p[0], True)
-            action_prob = p[0][action_id]
+            
+            m = Categorical(p)
+            action = m.sample()#sample an action
+            
+            reward = self.env.generate_reward(action.item(), i)
+            step_loss = -m.log_prob(action) * reward * 3
+   
             #Record action id and its corresponding probability
-            action_probs.append(action_prob)
-            actions.append(action_id)
+            action_loss.append(step_loss)
+            actions.append(action.item())
             
             #Update internal state, hidden_state(1, 1, hidden_size)
-            self.env.update_state(word, action_id)
+            self.env.update_state(word, action.item())
         ###########output log probability, 1*hidden_dim
         hidden_state = self.env.hidden_state
         final_h = F.dropout(hidden_state[0], p=0.5, training=self.training)
@@ -342,7 +285,7 @@ class Agent(nn.Module):
 
 
         #########loss of predict actions
-        action_loss, classification_loss = self.calculate_action_loss(pred, labels, actions, action_probs, weights)
+        action_loss, classification_loss = self.calculate_action_loss(pred, labels, actions, action_loss)
         return pred, actions, action_loss, classification_loss
 
 
@@ -355,12 +298,10 @@ class Agent(nn.Module):
         '''
         #########Get the final output of the lstm
         #encode the whole sentence
-        self.env.init_hidden()
-        self.env.get_sent_context_state(sents)
+        self.env.init_env(sents, masks)
 
         ##########Get target embedding, average
         targets = get_target_emb(sents, masks)
-        max_len = sents.size(1)
 
         ############Get position embedding: 1, max_len, word_emb
         sent_pos_emb = self.get_pos_emb(sents)
@@ -371,7 +312,7 @@ class Agent(nn.Module):
         sent = sents[0]
         sent_pos_emb = sent_pos_emb[0]
         actions = []
-        action_probs = []
+        action_loss = []
         #Select each word
         for i, word in enumerate(sent):
             #word embedding: 1, emb_dim
@@ -383,19 +324,20 @@ class Agent(nn.Module):
             #target pos embedding:1, emb_dim
             targets = targets + target_pos_emb
 
-            
             #Get the state, not differentiable for the action
-            observation = self.env.get_current_state(i, word, pos_emb, targets, target_pos_emb)
-            p = self.pnet(observation)#p is a tensor, 1*num
-            action_id = self.generate_action(p[0], False)
+            observation = self.env.set_current_state(i, word, pos_emb, targets, target_pos_emb)
             
-            actions.append(action_id)
+            p = self.pnet(observation)#p is a tensor, 1*num
+            
+            action = p[0].argmax()#choose the action has largest probability
+
+            actions.append(action.item())
             
             #Update internal state, hidden_state(1, 1, hidden_size)
-            self.env.update_state(word, action_id)
+            self.env.update_state(word, action.item())
         ###########output log probability, 1*hidden_dim
         hidden_state = self.env.hidden_state
-        final_h = F.dropout(hidden_state[0], p=0.5, training=self.training)
+        final_h = hidden_state[0]
         pred = F.log_softmax(self.vec2label(final_h), 1)#1*num
 
         pred_label = pred.argmax(1)
@@ -411,7 +353,7 @@ class Agent(nn.Module):
         return neg_log_prob
 
 
-    def calculate_action_loss(self, preds, labels, actions, action_probs, parse_weights):
+    def calculate_action_loss(self, preds, labels, actions, action_loss):
         '''
         Calculate reward values for a sentence
         preds: probability, [1, label_size]
@@ -420,23 +362,16 @@ class Agent(nn.Module):
         select_action_probs:[1, sent_len]
         parse_weights:[1, sent_len], weights for each word given the target
         '''
-        #Final reward
-        delete_num = len(actions) - sum(actions)
+
         #loss for the gold ground
         classification_loss = self.log_loss(preds, labels)
         ground_truth_prob = -classification_loss.detach().numpy()#negative, the bigger the better
-
-        #Reward the action that can remove words
-        del_reward = float(delete_num)/2#len(actions)#more words deleted, better
-        parse_reward = np.sum(np.array(actions) * parse_weights)
-            
-        reward = ground_truth_prob + del_reward + parse_reward
         
         
         #Loss for the prediction of actions
-        loss = -torch.log(torch.stack(action_probs)).mean()
+        action_loss_avg = torch.stack(action_loss).mean()
   
-        action_loss = loss * reward#smaller is better
+        action_loss = action_loss_avg * (10 + ground_truth_prob)#smaller is better
 
         return action_loss, classification_loss
 
@@ -469,18 +404,7 @@ class Agent(nn.Module):
         '''
         return np.random.choice(self.action_ids)
 
-    def get_parsing_weights(self, sents, masks, max_len):
-        '''
-        Get sentence's parsing weights according to the target
-        Args:
-        sents: [batch_size, len], texts
-        masks: [batch_size, len], binary
-        '''
-        ##########Get parsing weights for each sentence given a target
-        target_indice = convert_mask_index(masks)#Get target indice
-        weights = get_context_weight(sents, target_indice, max_len)
-        #Not differentiable
-        return weights
+
     
 
     def position_encoding_init(self, n_position, emb_dim):
