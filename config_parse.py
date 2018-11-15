@@ -14,7 +14,7 @@ class Config():
 
         # lstm
         #self.l_hidden_size = 256
-        self.l_hidden_size = 512#elmo
+        self.l_hidden_size = 256#elmo
         self.l_num_layers = 2 # forward and backward
         self.rnn_dropout = 0.1
 
@@ -25,7 +25,7 @@ class Config():
 
         self.opt = "Adam"
         self.dropout = 0.5
-        self.epoch = 30
+        self.epoch = 50
         self.lr = 0.2/ self.batch_size
         self.l2 = 0.0
         self.adjust_every = 8

@@ -47,7 +47,7 @@ class dependency_path:
         # nodes = [nodes[i] for i in indice]
         # node_num = len(nodes)
         #mat = np.ones([word_num, word_num]) * 1000
-        mat = (1-np.identity(word_num)) * 1000
+        mat = (1-np.identity(word_num)) * 10
         #Calculate the path for each node pair
         for i in np.arange(len(nodes)-1):
             for j in np.arange(i+1, len(nodes)):
@@ -65,7 +65,7 @@ class dependency_path:
         '''
         target_weights = np.zeros([len(target_nodes), len(mat)])
         for i, node in enumerate(target_nodes):
-            target_weights[i] = np.exp(-mat[node]**2/max(mat[node]))
+            target_weights[i] = np.exp(-mat[node]**2/max(mat[i]))
         max_target_weight = target_weights.max(0)
         min_target_weight = target_weights.min(0)
         avg_target_weight = target_weights.mean(0)
@@ -155,7 +155,9 @@ class constituency_path:
         for i, node in enumerate(target_nodes):
             target_weights[i] = np.array(self.compute_target_distance(positions, node))
             #target_weights[i] /= sum(target_weights[i])
-            target_weights[i] = np.exp(-target_weights[i]**2/max(target_weights[i]))
+            #target_weights[i] = np.exp(-target_weights[i]**1.5/max(target_weights[i]))##accuracy over 79%
+            #target_weights[i] = np.exp(-target_weights[i]**2/max(target_weights[i]))
+            target_weights[i] = np.exp(-target_weights[i]**2/10)
         max_target_weight = target_weights.max(0)
         min_target_weight = target_weights.min(0)
         avg_target_weight = target_weights.mean(0)

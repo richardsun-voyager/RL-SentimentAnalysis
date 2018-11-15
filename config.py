@@ -41,11 +41,13 @@ class Config:
         self.opt = 'Adam'
         self.dropout = 0.5
         self.if_update_embed = False
-        self.if_gpu = False
+        self.if_gpu = True
         self.lr = 0.0001
         self.l2 = 0.0001
         self.epochs= 100
         self.adjust_every = 8
+        
+        self.join_train = True
 
         #tokenization tool
         self.is_stanford_nlp = True

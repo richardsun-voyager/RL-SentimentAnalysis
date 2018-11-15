@@ -16,7 +16,7 @@ def convert_mask_index(masks):
     '''
     target_indice = []
     for mask in masks:
-        indice = torch.nonzero(mask == 1).squeeze(1).numpy()
+        indice = torch.nonzero(mask == 1).squeeze(1).cpu().numpy()
         target_indice.append(indice)
     return target_indice
 

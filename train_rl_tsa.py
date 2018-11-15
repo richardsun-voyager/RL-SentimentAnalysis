@@ -1,6 +1,6 @@
 #!/usr/bin/python
 from __future__ import division
-from Agent6 import *
+from Agent8 import *
 from data_reader_general import *
 from config import config 
 from Layer import GloveMaskCat
@@ -31,6 +31,7 @@ def create_opt(parameters, config):
 id2label = ["positive", "neutral", "negative"]
 #Load concatenation layer and attention model layer
 cat_layer = GloveMaskCat(config)
+if config.if_gpu:cat_layer = cat_layer.cuda()
 
 
 def train():
@@ -56,23 +57,25 @@ def train():
     dg_train = data_generator(config, train_data, False)
     dg_test =data_generator(config, test_data, False)
 
-
-#     if os.path.exists(config.model_path+'rl_model.pt'):
+    model = Agent(config)
+    if config.if_gpu: model = model.cuda()
+#     path = 'rl_model.pt'
+#     if os.path.exists(config.model_path+path):
 #         print('Loading pretrained model....')
-#         model = torch.load(config.model_path+'rl_model.pt')
-#     else:
-#         model = Agent(config)
+#         file = torch.load(config.model_path+path)
+#         model.load_state_dict(file)
 
 #     visualize_samples(dg_train, model)
 #     sys.exit()
 
+    
     cat_layer.load_vector()
 
-    model = Agent(config)
+    #model = Agent(config)
 
-    if config.if_gpu: model = model.cuda()
+    
     parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
-    # pdb.set_trace()
+
     optimizer = create_opt(parameters, config)
 
     loops = dg_train.data_len
@@ -94,18 +97,28 @@ def train():
             for _ in np.arange(batch):
                 sent_vecs, mask_vecs, label_list, sent_lens, texts = next(dg_train.get_ids_samples())
                 #Get embeddings for the sentence and the target, no concatenation
-                sent_vecs, target_vecs = cat_layer(sent_vecs, mask_vecs, False)
+                sent_vecs, target_vecs = cat_layer(sent_vecs, mask_vecs)
+                if config.if_gpu:
+                    sent_vecs = sent_vecs.cuda()
+                    mask_vecs = mask_vecs.cuda()
+                    label_list = label_list.cuda()
+                    sent_lens = sent_lens.cuda()
                 #Pass target vectors to the model
                 _, actions, action_loss, classify_loss = model(sent_vecs, mask_vecs, label_list, texts)
                 total_loss1 += action_loss
                 total_loss2 += classify_loss
             total_loss1 = total_loss1/batch
             total_loss2 = total_loss2/batch
-            total_loss1.backward(retain_graph=True)
-            total_loss2.backward()
+            if config.join_train:
+                total_loss = total_loss1 + total_loss2*2
+                total_loss.backward()
+            else:
+                total_loss1.backward(retain_graph=True)
+                total_loss2.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.clip_norm, norm_type=2)
             optimizer.step()
             if i %20 == 0:
+                print('Action', actions)
                 print('Action Loss:', total_loss1)
                 print('Classification Loss:', total_loss2)
         
@@ -119,24 +132,25 @@ def train():
             best_acc = acc
             #best_model = copy.deepcopy(model)
             torch.save(model.state_dict(), config.model_path+'rl_model.pt')
+            torch.save(cat_layer, config.model_path+'rl_model_layer.pt')
 
 def visualize_samples(dr_test, model):
     '''
     Show examples of actions
     '''
-    print("Evaluting")
     dr_test.reset_samples()
     model.eval()
-    all_counter = 0
-    while all_counter < 30:
-        all_counter += 1
+    all_counter = dr_test.data_len
+    correct_count = 0
+    while dr_test.index < 30:
         sent_vecs, mask_vecs, label, sent_len, texts = next(dr_test.get_ids_samples())
         sent, target = cat_layer(sent_vecs, mask_vecs)
         if config.if_gpu: 
             sent, target = sent.cuda(), target.cuda()
             label, sent_len = label.cuda(), sent_len.cuda()
+        
         pred_label, actions  = model.predict(sent, mask_vecs) 
-        if pred_label[0] != label[0]:
+        if pred_label[0] == label[0]:
             print('*'*20)
             print(texts)
             print('Targets:')

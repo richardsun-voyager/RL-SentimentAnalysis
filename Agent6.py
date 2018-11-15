@@ -1,5 +1,7 @@
 import numpy as np
+import pickle
 import torch
+import os
 from torch.nn import utils as nn_utils
 #from config import config
 import torch.nn as nn
@@ -40,6 +42,19 @@ class Env(nn.Module):
         
         init_ortho(self.rnn)
         init_ortho(self.birnn)
+        self.load_params()
+        
+    def load_params(self, file='data/models/pretrained_lstm_params.pkl'):
+        if os.path.exists(file):
+            with open(file, 'rb') as f:
+                weight_hh_l0, weight_hh_l0_reverse, weight_ih_l0, weight_ih_l0_reverse = pickle.load(f)
+            self.birnn.weight_hh_l0.data.copy_(weight_hh_l0.data)
+            self.birnn.weight_hh_l0_reverse.data.copy_(weight_hh_l0_reverse.data)
+            self.birnn.weight_ih_l0.data.copy_(weight_ih_l0)
+            self.birnn.weight_ih_l0_reverse.data.copy_(weight_ih_l0_reverse.data)
+            print('BiLSTM parameters Initialized!')
+        else:
+            print('Pretrained file not found')
         
     def init_env(self, sents, masks, texts=None):
         '''
@@ -91,7 +106,7 @@ class Env(nn.Module):
             del_reward = 0
         else:
             parse_reward = 0
-            del_reward = 0.1
+            del_reward = 0.2
         return del_reward+parse_reward
 
         
@@ -249,7 +264,9 @@ class Agent(nn.Module):
         sent_pos_emb = sent_pos_emb[0]
         actions = []
         action_loss = []
+        rewards = []
         #Select each word
+        #Only one sentence, so the length is real
         for i, word in enumerate(sent):
             #word embedding: 1, emb_dim
             word = word.view(1, -1)
@@ -270,10 +287,12 @@ class Agent(nn.Module):
             action = m.sample()#sample an action
             
             reward = self.env.generate_reward(action.item(), i)
-            step_loss = -m.log_prob(action) * reward * 3
+            step_loss = -m.log_prob(action)
+            rewards.append(reward)
    
             #Record action id and its corresponding probability
             action_loss.append(step_loss)
+            #action_loss.append(step_loss*reward)
             actions.append(action.item())
             
             #Update internal state, hidden_state(1, 1, hidden_size)
@@ -285,7 +304,7 @@ class Agent(nn.Module):
 
 
         #########loss of predict actions
-        action_loss, classification_loss = self.calculate_action_loss(pred, labels, actions, action_loss)
+        action_loss, classification_loss = self.calculate_action_loss(pred, labels, actions, action_loss, rewards)
         return pred, actions, action_loss, classification_loss
 
 
@@ -353,7 +372,7 @@ class Agent(nn.Module):
         return neg_log_prob
 
 
-    def calculate_action_loss(self, preds, labels, actions, action_loss):
+    def calculate_action_loss(self, preds, labels, actions, action_loss, rewards):
         '''
         Calculate reward values for a sentence
         preds: probability, [1, label_size]
@@ -369,7 +388,11 @@ class Agent(nn.Module):
         
         
         #Loss for the prediction of actions
-        action_loss_avg = torch.stack(action_loss).mean()
+        #Normalize the rewards
+        rewards = torch.FloatTensor(rewards)
+        rewards = (rewards - rewards.mean())/rewards.var()
+        rewards.requires_grad = False
+        action_loss_avg = torch.stack(action_loss*rewards).mean()
   
         action_loss = action_loss_avg * (10 + ground_truth_prob)#smaller is better
 
