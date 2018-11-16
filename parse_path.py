@@ -157,7 +157,7 @@ class constituency_path:
             #target_weights[i] /= sum(target_weights[i])
             #target_weights[i] = np.exp(-target_weights[i]**1.5/max(target_weights[i]))##accuracy over 79%
             #target_weights[i] = np.exp(-target_weights[i]**2/max(target_weights[i]))
-            target_weights[i] = np.exp(-target_weights[i]**2/10)
+            #target_weights[i] = np.exp(-target_weights[i]**2/10)
         max_target_weight = target_weights.max(0)
         min_target_weight = target_weights.min(0)
         avg_target_weight = target_weights.mean(0)

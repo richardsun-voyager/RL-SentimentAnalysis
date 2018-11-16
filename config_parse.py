@@ -26,7 +26,7 @@ class Config():
         self.opt = "Adam"
         self.dropout = 0.5
         self.epoch = 50
-        self.lr = 0.2/ self.batch_size
+        self.lr = 0.005/ self.batch_size
         self.l2 = 0.0
         self.adjust_every = 8
         self.clip_norm = 3

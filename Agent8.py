@@ -42,22 +42,51 @@ class Env(nn.Module):
         
         init_ortho(self.rnn)
         init_ortho(self.birnn)
-        self.load_params()
+        self.load_lstm_params()
+        self.load_bilstm_params()
         
-    def load_params(self, file='data/models/pretrained_lstm_params.pkl'):
+    def load_lstm_params(self, file='data/models/unirnn_parameters.pkl'):
+        if os.path.exists(file):
+            with open(file, 'rb') as f:
+                weight_hh_l0, weight_ih_l0, bias_hh_l0, bias_ih_l0 = pickle.load(f)
+            self.rnn.weight_hh_l0.data.copy_(weight_hh_l0.data)
+            self.rnn.weight_ih_l0.data.copy_(weight_ih_l0.data)
+            self.rnn.bias_hh_l0.data.copy_(bias_hh_l0.data)
+            self.rnn.bias_ih_l0.data.copy_(bias_ih_l0.data)
+        else:
+            print('Pretrained file not found!')
+
+        
+    def load_bilstm_params(self, file='data/models/pretrained_bilstm_params.pkl'):
         '''
         Initialize BiLSTM with pre-trained parameters
         '''
         if os.path.exists(file):
             with open(file, 'rb') as f:
-                weight_hh_l0, weight_hh_l0_reverse, weight_ih_l0, weight_ih_l0_reverse = pickle.load(f)
+                parameters = pickle.load(f)
+            weight_hh_l0= parameters['weight_hh_l0']
+            bias_hh_l0 = parameters['bias_hh_l0'] 
+            weight_hh_l0_reverse = parameters['weight_hh_l0_reverse']
+            bias_hh_l0_reverse = parameters['bias_hh_l0_reverse']
+            weight_ih_l0 = parameters['weight_ih_l0']
+            bias_ih_l0 = parameters['bias_ih_l0']
+            weight_ih_l0_reverse = parameters['weight_ih_l0_reverse']
+            bias_ih_l0_reverse = parameters['bias_ih_l0_reverse']
+            
             self.birnn.weight_hh_l0.data.copy_(weight_hh_l0.data)
             self.birnn.weight_hh_l0_reverse.data.copy_(weight_hh_l0_reverse.data)
             self.birnn.weight_ih_l0.data.copy_(weight_ih_l0)
             self.birnn.weight_ih_l0_reverse.data.copy_(weight_ih_l0_reverse.data)
+            
+            self.birnn.bias_hh_l0.data.copy_(bias_hh_l0.data)
+            self.birnn.bias_hh_l0_reverse.data.copy_(bias_hh_l0_reverse.data)
+            self.birnn.bias_ih_l0.data.copy_(bias_ih_l0)
+            self.birnn.bias_ih_l0_reverse.data.copy_(bias_ih_l0_reverse.data)
             print('BiLSTM parameters Initialized!')
         else:
             print('Pretrained file not found')
+            
+        
         
     def init_env(self, sents, masks, texts=None):
         '''
@@ -90,6 +119,7 @@ class Env(nn.Module):
         weights = get_context_weight(texts, target_indice, max_len)
         #Not differentiable
         self.weights = weights
+        #print(weights)
     
     def init_hidden(self):
         '''
@@ -106,17 +136,16 @@ class Env(nn.Module):
         '''
         Give reward for an action, the reward must be reasonable for selecting right words
         '''
+        parse_reward = self.weights[0][pos]
+        reward = 0.2
         if action == 1:
-            parse_reward = self.weights[0][pos]
-            if parse_reward > 0.2:
-                parse_reward = 1
-            del_reward = 0
+            if parse_reward > 0.1:
+                reward = 1
         else:
-            parse_reward = 0
-            del_reward = 0.5
+            if parse_reward < 0.05:
+                reward = 1
         #print(parse_reward)
-        total_reward = del_reward+parse_reward
-        return total_reward
+        return reward
     
     def generate_critic_action(self, pos):
         if self.weights[0][pos] > 0.2:
@@ -211,7 +240,7 @@ class Policy_network(nn.Module):
         h_c = observation['current_hidden']
         target = observation['target']
 
-        temp = self.enc2temp(h_e) + self.hidden2temp(h_c) + self.target2temp(target)
+        temp = self.enc2temp(h_e)  + self.target2temp(target)# + self.hidden2temp(h_c)
         temp = self.activation(temp)
         output = self.state2action(temp)
         action_prob = F.softmax(output, 1)
@@ -301,10 +330,10 @@ class Agent(nn.Module):
             pos_emb = sent_pos_emb[i].view(1, -1)
             
             #####*********No positional embedding*******
-            word = word + pos_emb
+            #word = word + pos_emb
             ###target embedding:1, emb_dim
             ###target pos embedding:1, emb_dim
-            targets = targets + target_pos_emb
+            #targets = targets + target_pos_emb
 
             
             #Get the state, not differentiable for the action
@@ -436,11 +465,11 @@ class Agent(nn.Module):
         if self.config.if_gpu:
             rewards = rewards.cuda()
             action_loss = action_loss.cuda()
-        action_loss_avg = (action_loss*rewards).mean()
-        #action_loss_avg = action_loss.mean()
-        total_reward = ground_truth_prob
+        #action_loss_avg = (action_loss*rewards).mean()
+        action_loss_avg = action_loss.mean()
+        total_reward = ground_truth_prob + rewards.mean().cpu().item()
   
-        action_loss = action_loss_avg * (2+total_reward)#smaller is better
+        action_loss = action_loss_avg * (total_reward)#smaller is better
 
         return action_loss, classification_loss
 

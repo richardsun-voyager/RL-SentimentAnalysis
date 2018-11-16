@@ -86,7 +86,7 @@ def train():
         print('Epoch:', e)
         model.train()
         dg_train.reset_samples()
-        batch = 32
+        batch = 64
         iter_num =int(loops/batch)
         for i in range(iter_num):
             optimizer.zero_grad()

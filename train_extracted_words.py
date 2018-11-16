@@ -89,27 +89,43 @@ def get_context_weight(texts, targets, max_len):
         try:
             max_w, min_w, a_v = cp.proceed(token, targets[i])
             weights[i, :len(max_w)] = max_w
-            weights = np.where(weights>0.3, 1, 0)
+            weights = np.where(weights>0.01, weights, 0)
         except Exception as e:
             print(e)
             print(token, targets[i])
     return weights
 
-def extract_words(sents, weights, sent_lens):
+def extract_words(sents, weights, sent_lens, texts=None):
     '''
     sents: batch_size*sent_len
     sent_lens: a list
     '''
     sent_vecs = torch.zeros_like(sents)
     sent_len_new = []
+    extracted_texts = []
     for i, weight in enumerate(weights):
         indices = np.nonzero(weight)[0]
         sent_vecs[i][:len(indices)] = sents[i][indices]
         sent_len_new.append(len(indices))
+        if texts:
+            print('#############################')
+            print(weight)
+            print(indices)
+            text = np.array(texts[i].split())
+            print('Original text')
+            print(text)
+            text = text[indices]
+            print('Extractedwords')
+            print(text)
+            extracted_texts.append(text)
     sent_len_new = torch.LongTensor(sent_len_new)    
-    return sent_vecs, sent_lens
+    return sent_vecs, sent_len_new
         
-        
+def sort_data(sents, labels, sent_lens):
+    sent_lens, perm_idx = sent_lens.sort(0, descending=True)
+    sent_vecs = sents[perm_idx]
+    labels = labels[perm_idx]
+    return sent_vecs, labels, sent_lens
 
 
 def train():
@@ -187,7 +203,8 @@ def train():
             max_len = max(sent_lens).item()
            #weights = get_dependency_weight(tokens, target_indice, max_len)#Get weights for each sentence
             weights = get_context_weight(tokens, target_indice, max_len)
-            sent_vecs, sent_lens = extract_words(sent_vecs, weights, sent_lens)
+            sent_vecs, sent_lens = extract_words(sent_vecs, weights, sent_lens, tokens)
+            sent_vecs, label_list, sent_lens = sort_data(sent_vecs, label_list, sent_lens)
             sent_vecs, target_avg = cat_layer(sent_vecs, mask_vecs)#Batch_size*max_len*(2*emb_size)
             if config.if_gpu: 
                 sent_vecs, target_avg = sent_vecs.cuda(), target_avg.cuda()
@@ -251,6 +268,7 @@ def evaluate_test(dr_test, model):
         max_len = max(sent_lens).item()
         weights = get_context_weight(tokens, target_indice, max_len)#Get weights for each sentence
         sent_vecs, sent_lens = extract_words(sent_vecs, weights, sent_lens)
+        sent_vecs, label_list, sent_lens = sort_data(sent_vecs, label_list, sent_lens)
         sent_vecs, target_avg = cat_layer(sent_vecs, mask_vecs)#Batch_size*max_len*(2*emb_size)
         if config.if_gpu: 
             sent_vecs, target_avg = sent_vecs.cuda(), target_avg.cuda()
